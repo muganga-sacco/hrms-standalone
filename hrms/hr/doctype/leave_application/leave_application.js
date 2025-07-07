@@ -51,7 +51,8 @@ frappe.ui.form.on('Leave Application', {
     const employee_id = frm.doc.employee;
 
 
-    if (workflowState === "Pending Supervisor Approval") {
+    if (workflowState === "Pending Supervisor Approval"||
+        workflowState === "Pending HR Approval") {
         if (!cover_field || cover_field.length === 0) {
             frappe.throw("The field for who will cover during absence is empty. Please fill it.");
         }

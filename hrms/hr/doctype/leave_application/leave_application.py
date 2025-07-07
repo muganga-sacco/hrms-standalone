@@ -85,6 +85,8 @@ class LeaveApplication(Document, PWANotificationsMixin):
             self.validate_optional_leave()
         self.validate_applicable_after()
         Send_notification(self)
+        send_notification_to_supervisor(self)
+        send_notification_levels(self)
         
 
     def on_update(self):
@@ -1612,7 +1614,185 @@ def Send_notification(self):
         # Continue building the message
         message += f"""
                     <p>Dear {user_name},</p>
-                    <p>{salutation} {employee_name} is applying for leave. 
+                    <p>{salutation} {employee_name} has applied for leave. 
+                    Kindly be informed that you will be covering their absence from {self.from_date} to {self.to_date}. 
+                    You are requested to contact them for a proper handover of duties and responsibilities.</p>
+                   
+        """
+
+
+        # Close the table and HTML message
+        message += """     
+                    <p>Best regards,</p>
+                </div>
+
+                <!-- Footer section -->
+                <div class="footer">
+                 <p>&copy; 2025 MugangaSACCO. All rights reserved.</p> 
+                </div>
+            </div>
+
+        </body>
+
+        </html>
+        """
+        try:
+            frappe.sendmail(
+                recipients=[user_email],
+                subject=subject,
+                message=message,
+                now=True,
+            )
+            print(f"Email sent to {user_email}")
+        except Exception as e:
+            frappe.log_error(f"Error sending email to {user_email}: {str(e)}")
+          
+            return False
+        
+    if self.workflow_state == 'Approved':
+        cover_mail = self.cover  # Link to Employee
+        employee_name = self.employee_name
+        employee=self.employee
+        cover = frappe.db.get_value("Employee", {"user_id": cover_mail}, "name")
+        salutation= frappe.db.get_value("Employee",{"employee":employee},"salutation")
+        
+
+        try:
+            cover_employee = frappe.get_doc('Employee', cover)
+        except frappe.DoesNotExistError:
+            frappe.throw(f"Employee {cover} does not exist")
+
+        # Fetch email and name of the cover employee
+        user_name = cover_employee.employee_name
+        user_email = cover_employee.user_id  
+    
+      
+        # Update the check to use the correct workflow state logic
+        subject = f"You have been appointed to cover for {employee_name}"
+
+
+            # Start building the HTML message
+        message = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Appointment cover notification  </title>
+            <style>
+                body {{
+                    font-family: Arial, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    background-color: #f4f4f4;
+                }}
+                
+                img {{
+                    max-width:30%;
+                    display:flex;
+                    justify-content:left;
+                }}
+
+                .container {{
+                    width: 100%;
+                    padding: 20px;
+                    background-color: #F15C24;
+                    max-width: 700px;
+                    margin: 0 auto;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+                }}
+
+                .header {{
+                    text-align: center;
+                    padding: 20px; 
+                    background-color:#ffffff;
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                }}
+
+                .header h1 {{
+                    margin: 0;
+                    font-size: 24px;
+                }}
+
+                .content {{
+                    padding: 20px;
+                    color: #333333;
+                }}
+
+                .content p {{
+                    font-size: 16px;
+                    line-height: 1.5;
+                }}
+                .content h3{{
+                    
+                    padding:5px;
+                    text-decoration:underline; 
+                    justify-content:center; 
+                }}
+
+                .content table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 20px;
+                }}
+
+                .content table th,
+                .content table td {{
+                    border: 1px solid #dddddd;
+                    padding: 8px;
+                    text-align: left;
+                }}
+
+                .content table th {{
+                    background-color: #f2f2f2;
+                }}
+
+                .footer {{
+                    text-align: center;
+                    padding: 10px;
+                    background-color: #287C3D;
+                    color: #ffffff;
+                    border-bottom-left-radius: 8px;
+                    border-bottom-right-radius: 8px;
+                    font-size: 14px;
+                }}
+                
+                p{{
+                    text-align: justify;
+                    color:#ffffff;
+                }}
+
+                .footer p {{
+                    color: #ffffff;
+                    text-decoration: none;
+                    text-align: center;
+                }}
+            </style>
+        </head>
+
+        <body>
+
+            <div class="container">
+                <!-- Header section -->
+                <div class="header">
+                    <img src="https://mugangasacco.rw/wp-content/uploads/2021/02/Muganga-Sacco-Logo-Final-01.png" alt="Company Logo"/>
+                    <h1>Meeting Invitation</h1>
+                </div>
+                <!-- Content section -->
+                <div class="content">
+        """
+
+        # Add the attendees' names to the message
+
+         
+
+        # Continue building the message
+        message += f"""
+                    <p>Dear {user_name},</p>
+                    <p>{salutation} {employee_name} has applied for leave. 
                     Kindly be informed that you will be covering their absence from {self.from_date} to {self.to_date}. 
                     You are requested to contact them for a proper handover of duties and responsibilities.</p>
                    
@@ -1648,4 +1828,466 @@ def Send_notification(self):
             return False
         
         
-       
+def send_notification_to_supervisor(self):
+    """
+    Send notification to the  supervisor when leave is being processed.
+    """
+    if self.workflow_state == 'Pending Supervisor Approval':
+         
+        leave_applier = self.employee
+
+        query = """
+            SELECT manager.company_email
+            FROM `tabEmployee` employee
+            JOIN `tabEmployee` manager ON employee.reports_to = manager.name
+            WHERE employee.name = %s
+        """
+
+        result = frappe.db.sql(query, (leave_applier,),  as_dict=0)
+        employee_name = self.employee_name
+        employee=self.employee
+        salutation= frappe.db.get_value("Employee",{"employee":employee},"salutation")
+        name = self.name
+        
+        result = result[0][0]
+
+        
+        # Update the check to use the correct workflow state logic
+        subject = f"Pending leave Application Review"
+
+
+            # Start building the HTML message
+        message = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Leave application  </title>
+            <style>
+                body {{
+                    font-family: Arial, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    background-color: #f4f4f4;
+                }}
+                
+                img {{
+                    max-width:30%;
+                    display:flex;
+                    justify-content:left;
+                }}
+
+                .container {{
+                    width: 100%;
+                    padding: 20px;
+                    background-color: #F15C24;
+                    max-width: 700px;
+                    margin: 0 auto;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+                }}
+
+                .header {{
+                    text-align: center;
+                    padding: 20px; 
+                    background-color:#ffffff;
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                }}
+
+                .header h1 {{
+                    margin: 0;
+                    font-size: 24px;
+                }}
+
+                .content {{
+                    padding: 20px;
+                    color: #333333;
+                }}
+
+                .content p {{
+                    font-size: 16px;
+                    line-height: 1.5;
+                }}
+                .content h3{{
+                    
+                    padding:5px;
+                    text-decoration:underline; 
+                    justify-content:center; 
+                }}
+
+                .content table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 20px;
+                }}
+
+                .content table th,
+                .content table td {{
+                    border: 1px solid #dddddd;
+                    padding: 8px;
+                    text-align: left;
+                }}
+
+                .content table th {{
+                    background-color: #f2f2f2;
+                }}
+
+                .footer {{
+                    text-align: center;
+                    padding: 10px;
+                    background-color: #287C3D;
+                    color: #ffffff;
+                    border-bottom-left-radius: 8px;
+                    border-bottom-right-radius: 8px;
+                    font-size: 14px;
+                }}
+                
+                p{{
+                    text-align: justify;
+                    color:#ffffff;
+                }}
+
+                .footer p {{
+                    color: #ffffff;
+                    text-decoration: none;
+                    text-align: center;
+                }}
+            </style>
+        </head>
+
+        <body>
+
+            <div class="container">
+                <!-- Header section -->
+                <div class="header">
+                    <img src="https://mugangasacco.rw/wp-content/uploads/2021/02/Muganga-Sacco-Logo-Final-01.png" alt="Company Logo"/>
+                    <h1>Leave application</h1>
+                </div>
+                <!-- Content section -->
+                <div class="content">
+        """
+
+        # Add the attendees' names to the message
+
+         
+
+        # Continue building the message
+        message += f"""
+                   <p>Dear Supervisor</p><br/>
+                    <p>{ salutation } { employee_name } needs your approval for the leave requested.</p>
+                    <p>
+                        <a href="{ frappe.utils.get_url_to_form('Leave Application', name) }" target="_blank">
+                            { _('Open Now') }
+                        </a>
+                    </p>
+                   
+        """
+
+
+        # Close the table and HTML message
+        message += """     
+                    <p>Best regards,</p>
+                </div>
+
+                <!-- Footer section -->
+                <div class="footer">
+                 <p>&copy; 2025 MugangaSACCO. All rights reserved.</p> 
+                </div>
+            </div>
+
+        </body>
+
+        </html>
+        """
+        try:
+            frappe.sendmail(
+                recipients=[result],
+                subject=subject,
+                message=message,
+                now=True,
+            )
+            print(f"Email sent to {result}")
+        except Exception as e:
+            frappe.log_error(f"Error sending email to {result}: {str(e)}")
+          
+            return False
+
+
+##### Sending notification to HR, DAF, and DG when leave is approved #####
+
+
+def send_notification_levels(self):
+    # Get HR emails
+    get_HR = frappe.db.get_list('User', filters={'role_profile_name': 'HR'}, fields=['email'])
+    hr_emails = [user['email'] for user in get_HR]
+    hr_emails=hr_emails[0]
+    
+    # Get DAF emails
+    get_DAF = frappe.db.get_list('User', filters={'role_profile_name': 'DAF'}, fields=['email'])
+    daf_emails = [user['email'] for user in get_DAF]
+    daf_emails = daf_emails[0]
+    
+    # Get DG emails (Hr manager)
+    get_DG = frappe.db.get_list('User', filters={'role_profile_name': 'Hr manager'}, fields=['email'])
+    dg_emails = [user['email'] for user in get_DG]
+    dg_emails = dg_emails[0]
+    employee_name = self.employee_name
+    employee=self.employee
+    salutation= frappe.db.get_value("Employee",{"employee":employee},"salutation")
+    name = self.name
+    
+    # Update the check to use the correct workflow state logic
+    subject = f"Pending leave Application Review"
+
+
+            # Start building the HTML message
+    message = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Leave application  </title>
+            <style>
+                body {{
+                    font-family: Arial, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    background-color: #f4f4f4;
+                }}
+                
+                img {{
+                    max-width:30%;
+                    display:flex;
+                    justify-content:left;
+                }}
+
+                .container {{
+                    width: 100%;
+                    padding: 20px;
+                    background-color: #F15C24;
+                    max-width: 700px;
+                    margin: 0 auto;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+                }}
+
+                .header {{
+                    text-align: center;
+                    padding: 20px; 
+                    background-color:#ffffff;
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                }}
+
+                .header h1 {{
+                    margin: 0;
+                    font-size: 24px;
+                }}
+
+                .content {{
+                    padding: 20px;
+                    color: #333333;
+                }}
+
+                .content p {{
+                    font-size: 16px;
+                    line-height: 1.5;
+                }}
+                .content h3{{
+                    
+                    padding:5px;
+                    text-decoration:underline; 
+                    justify-content:center; 
+                }}
+
+                .content table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 20px;
+                }}
+
+                .content table th,
+                .content table td {{
+                    border: 1px solid #dddddd;
+                    padding: 8px;
+                    text-align: left;
+                }}
+
+                .content table th {{
+                    background-color: #f2f2f2;
+                }}
+
+                .footer {{
+                    text-align: center;
+                    padding: 10px;
+                    background-color: #287C3D;
+                    color: #ffffff;
+                    border-bottom-left-radius: 8px;
+                    border-bottom-right-radius: 8px;
+                    font-size: 14px;
+                }}
+                
+                p{{
+                    text-align: justify;
+                    color:#ffffff;
+                }}
+
+                .footer p {{
+                    color: #ffffff;
+                    text-decoration: none;
+                    text-align: center;
+                }}
+            </style>
+        </head>
+
+        <body>
+
+            <div class="container">
+                <!-- Header section -->
+                <div class="header">
+                    <img src="https://mugangasacco.rw/wp-content/uploads/2021/02/Muganga-Sacco-Logo-Final-01.png" alt="Company Logo"/>
+                    <h1>Leave application</h1>
+                </div>
+                <!-- Content section -->
+                <div class="content">
+        """
+
+        # Add the attendees' names to the message
+
+         
+    if self.workflow_state == 'Pending HR Approval':
+        # Continue building the message
+        message += f"""
+                    <p>Dear HR</p><br/>
+                    <p>{ salutation } { employee_name } needs your approval for the leave requested.</p>
+                    <p>
+                        <a href="{ frappe.utils.get_url_to_form('Leave Application', name) }" target="_blank">
+                            { _('Open Now') }
+                        </a>
+                    </p>
+                    
+            """
+
+
+            # Close the table and HTML message
+        message += """     
+                        <p>Best regards,</p>
+                    </div>
+
+                    <!-- Footer section -->
+                    <div class="footer">
+                    <p>&copy; 2025 MugangaSACCO. All rights reserved.</p> 
+                    </div>
+                </div>
+
+            </body>
+
+            </html>
+            """
+        try:
+            frappe.sendmail(
+                recipients=[hr_emails],
+                subject=subject,
+                message=message,
+                now=True,
+            )
+            print(f"Email sent to {hr_emails}")
+        except Exception as e:
+            frappe.log_error(f"Error sending email to {hr_emails}: {str(e)}")
+            
+            return False
+    elif self.workflow_state == 'Pending DAF Approval':
+        # Continue building the message
+        message += f"""
+                    <p>Dear HR</p><br/>
+                    <p>{ salutation } { employee_name } needs your approval for the leave requested.</p>
+                    <p>
+                        <a href="{ frappe.utils.get_url_to_form('Leave Application', name) }" target="_blank">
+                            { _('Open Now') }
+                        </a>
+                    </p>
+                    
+            """
+
+
+            # Close the table and HTML message
+        message += """     
+                        <p>Best regards,</p>
+                    </div>
+
+                    <!-- Footer section -->
+                    <div class="footer">
+                    <p>&copy; 2025 MugangaSACCO. All rights reserved.</p> 
+                    </div>
+                </div>
+
+            </body>
+
+            </html>
+            """
+        try:
+            frappe.sendmail(
+                recipients=[daf_emails],
+                subject=subject,
+                message=message,
+                now=True,
+            )
+            print(f"Email sent to {daf_emails}")
+        except Exception as e:
+            frappe.log_error(f"Error sending email to {daf_emails}: {str(e)}")
+            
+            return False
+    elif self.workflow_state == 'Pending DG approval':
+        # Continue building the message
+        message += f"""
+                    <p>Dear HR</p><br/>
+                    <p>{ salutation } { employee_name } needs your approval for the leave requested.</p>
+                    <p>
+                        <a href="{ frappe.utils.get_url_to_form('Leave Application', name) }" target="_blank">
+                            { _('Open Now') }
+                        </a>
+                    </p>
+                    
+            """
+
+
+            # Close the table and HTML message
+        message += """     
+                        <p>Best regards,</p>
+                    </div>
+
+                    <!-- Footer section -->
+                    <div class="footer">
+                    <p>&copy; 2025 MugangaSACCO. All rights reserved.</p> 
+                    </div>
+                </div>
+
+            </body>
+
+            </html>
+            """
+        try:
+            frappe.sendmail(
+                recipients=[dg_emails],
+                subject=subject,
+                message=message,
+                now=True,
+            )
+            print(f"Email sent to {dg_emails}")
+        except Exception as e:
+            frappe.log_error(f"Error sending email to {dg_emails}: {str(e)}")
+            
+            return False
+
+    
+
+    
+   
+    
+    
+
