@@ -1601,7 +1601,7 @@ def Send_notification(self):
                 <!-- Header section -->
                 <div class="header">
                     <img src="https://mugangasacco.rw/wp-content/uploads/2021/02/Muganga-Sacco-Logo-Final-01.png" alt="Company Logo"/>
-                    <h1>Meeting Invitation</h1>
+                    <h1>Absence covering notification</h1>
                 </div>
                 <!-- Content section -->
                 <div class="content">

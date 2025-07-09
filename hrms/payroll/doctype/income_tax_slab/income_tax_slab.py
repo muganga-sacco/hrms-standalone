@@ -7,8 +7,11 @@ from frappe.model.document import Document
 # import frappe
 import frappe
 
+# from hrms
 
 class IncomeTaxSlab(Document):
+    
     def validate(self):
-        if self.company:
-            self.currency = hrms.get_company_currency(self.company)
+        return
+        # if self.company:
+        #     self.currency = hrms.get_company_currency(self.company)
