@@ -1611,43 +1611,7 @@ def Send_notification(self):
 
          
 
-        # Continue building the message
-        message += f"""
-                    <p>Dear {user_name},</p>
-                    <p>{salutation} {employee_name} has applied for leave. 
-                    Kindly be informed that you will be covering their absence from {self.from_date} to {self.to_date}. 
-                    You are requested to contact them for a proper handover of duties and responsibilities.</p>
-                   
-        """
-
-
-        # Close the table and HTML message
-        message += """     
-                    <p>Best regards,</p>
-                </div>
-
-                <!-- Footer section -->
-                <div class="footer">
-                 <p>&copy; 2025 MugangaSACCO. All rights reserved.</p> 
-                </div>
-            </div>
-
-        </body>
-
-        </html>
-        """
-        try:
-            frappe.sendmail(
-                recipients=[user_email],
-                subject=subject,
-                message=message,
-                now=True,
-            )
-            print(f"Email sent to {user_email}")
-        except Exception as e:
-            frappe.log_error(f"Error sending email to {user_email}: {str(e)}")
-          
-            return False
+       
         
     if self.workflow_state == 'Approved':
         cover_mail = self.cover  # Link to Employee
@@ -1779,7 +1743,7 @@ def Send_notification(self):
                 <!-- Header section -->
                 <div class="header">
                     <img src="https://mugangasacco.rw/wp-content/uploads/2021/02/Muganga-Sacco-Logo-Final-01.png" alt="Company Logo"/>
-                    <h1>Meeting Invitation</h1>
+                    <h1>Appointment cover notification</h1>
                 </div>
                 <!-- Content section -->
                 <div class="content">
