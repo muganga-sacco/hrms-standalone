@@ -26,6 +26,7 @@ from frappe.utils import (
     rounded,
 )
 from frappe.utils.background_jobs import enqueue
+from hrms import get_company_currency
 
 from hrms.utils import get_fiscal_year
 
@@ -172,7 +173,7 @@ class SalarySlip(TransactionBase):
 
     def set_net_total_in_words(self):
         doc_currency = self.currency
-        company_currency = hrms.get_company_currency(self.company)
+        company_currency = get_company_currency(self.company)
         total = self.net_pay if self.is_rounding_total_disabled() else self.rounded_total
         base_total = (
             self.base_net_pay if self.is_rounding_total_disabled() else self.base_rounded_total
@@ -321,8 +322,8 @@ class SalarySlip(TransactionBase):
             self.set("earnings", [])
             self.set("deductions", [])
 
-            if not self.salary_slip_based_on_timesheet:
-                self.get_date_details()
+            # if not self.salary_slip_based_on_timesheet:
+            #     self.get_date_details()
 
             self.validate_dates()
 

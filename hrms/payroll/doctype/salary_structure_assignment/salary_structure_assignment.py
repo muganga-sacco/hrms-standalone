@@ -23,8 +23,8 @@ class SalaryStructureAssignment(Document):
 	def validate(self):
 		self.validate_dates()
 		self.validate_company()
-		self.validate_income_tax_slab()
-		self.set_payroll_payable_account()
+		# self.validate_income_tax_slab()
+		# self.set_payroll_payable_account()
 
 		if self.earning_and_deduction_entries_does_not_exists():
 			if not self.taxable_earnings_till_date and not self.tax_deducted_till_date:
@@ -101,22 +101,22 @@ class SalaryStructureAssignment(Document):
 				)
 			)
 
-	def set_payroll_payable_account(self):
-		if not self.payroll_payable_account:
-			payroll_payable_account = frappe.db.get_value(
-				"Company", self.company, "default_payroll_payable_account"
-			)
-			if not payroll_payable_account:
-				payroll_payable_account = frappe.db.get_value(
-					"Account",
-					{
-						"account_name": _("Payroll Payable"),
-						"company": self.company,
-						"account_currency": frappe.db.get_value("Company", self.company, "default_currency"),
-						"is_group": 0,
-					},
-				)
-			self.payroll_payable_account = payroll_payable_account
+	# def set_payroll_payable_account(self):
+	# 	if not self.payroll_payable_account:
+	# 		payroll_payable_account = frappe.db.get_value(
+	# 			"Company", self.company, "default_payroll_payable_account"
+	# 		)
+	# 		if not payroll_payable_account:
+	# 			payroll_payable_account = frappe.db.get_value(
+	# 				"Account",
+	# 				{
+	# 					"account_name": _("Payroll Payable"),
+	# 					"company": self.company,
+	# 					"account_currency": frappe.db.get_value("Company", self.company, "default_currency"),
+	# 					"is_group": 0,
+	# 				},
+	# 			)
+	# 		self.payroll_payable_account = payroll_payable_account
 
 	@frappe.whitelist()
 	def set_payroll_cost_centers(self):

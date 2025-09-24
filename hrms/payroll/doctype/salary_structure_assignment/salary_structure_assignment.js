@@ -69,21 +69,21 @@ frappe.ui.form.on('Salary Structure Assignment', {
     }
   },
 
-  company: function (frm) {
-    if (frm.doc.company) {
-      frappe.db.get_value(
-        'Company',
-        frm.doc.company,
-        'default_payroll_payable_account',
-        (r) => {
-          frm.set_value(
-            'payroll_payable_account',
-            r.default_payroll_payable_account
-          );
-        }
-      );
-    }
-  },
+  // company: function (frm) {
+  //   if (frm.doc.company) {
+  //     frappe.db.get_value(
+  //       'Company',
+  //       frm.doc.company,
+  //       'default_payroll_payable_account',
+  //       (r) => {
+  //         frm.set_value(
+  //           'payroll_payable_account',
+  //           r.default_payroll_payable_account
+  //         );
+  //       }
+  //     );
+  //   }
+  // },
 
   set_payroll_cost_centers: function (frm) {
     if (
