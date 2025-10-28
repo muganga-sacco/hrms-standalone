@@ -87,6 +87,8 @@ class LeaveApplication(Document, PWANotificationsMixin):
         Send_notification(self)
         send_notification_to_supervisor(self)
         send_notification_levels(self)
+        # self.document_is_required()
+        self.validate_required_documents()
         
 
     def on_update(self):
@@ -491,11 +493,22 @@ class LeaveApplication(Document, PWANotificationsMixin):
         )[0][0]
 
         return leave_count_on_half_day_date * 0.5
-
+    
+    def validate_required_documents(self):
+        required_documents = frappe.db.get_value(
+            "Leave Type", self.leave_type, "attachment_document_required", as_dict=True
+        )
+        print("required_documents", required_documents)
+        if required_documents:
+            if not self.attachment_if_needed:
+                frappe.throw(
+                    _("Please attach document for leave type {0}").format(self.leave_type)
+                )
     def validate_max_days(self):
         max_days = frappe.db.get_value(
             "Leave Type", self.leave_type, "max_continuous_days_allowed"
         )
+        
         if not max_days:
             return
 
@@ -573,7 +586,9 @@ class LeaveApplication(Document, PWANotificationsMixin):
                 ),
                 AttendanceAlreadyMarkedError,
             )
-
+    def  document_is_required(self):
+        if frappe.db.get_value("Leave Type", self.leave_type, "is_document_required") and not self.attachment_if_needed:
+            frappe.throw(_("Please attach document for leave type {0}").format(self.leave_type))
     def validate_optional_leave(self):
         leave_period = get_leave_period(self.from_date, self.to_date, self.company)
         if not leave_period:

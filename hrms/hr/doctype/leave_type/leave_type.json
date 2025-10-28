@@ -16,6 +16,7 @@
   "is_carry_forward",
   "is_lwp",
   "is_ppl",
+  "attachment_document_required",
   "fraction_of_daily_salary_per_leave",
   "is_optional_leave",
   "allow_negative",
@@ -229,12 +230,20 @@
    "fieldtype": "Int",
    "label": "Non-Encashable Leaves",
    "non_negative": 1
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.is_lwp == 0",
+   "fieldname": "attachment_document_required",
+   "fieldtype": "Check",
+   "label": "Attachment document required"
   }
  ],
+ "grid_page_length": 50,
  "icon": "fa fa-flag",
  "idx": 1,
  "links": [],
- "modified": "2025-01-31 16:02:14.353755",
+ "modified": "2025-10-12 14:44:14.041557",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "Leave Type",
@@ -268,6 +277,7 @@
    "role": "Employee"
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
