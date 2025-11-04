@@ -496,17 +496,17 @@ class LeaveApplication(Document, PWANotificationsMixin):
     
     def validate_required_documents(self):
         required_documents = frappe.db.get_value(
-            "Leave Type", self.leave_type, "attachment_document_required", as_dict=True
+            "Leave Type", self.leave_type, "attachment_document_required"
         )
-        print("required_documents", required_documents)
-        if required_documents:
-            if not self.attachment_if_needed:
-                frappe.throw(
-                    _("Please attach document for leave type {0}").format(self.leave_type)
-                )
+
+        if required_documents == 1:
+            # Do something when attachment is required
+            frappe.msgprint("Attachment is required for this leave type.")
+        
     def validate_max_days(self):
         max_days = frappe.db.get_value(
             "Leave Type", self.leave_type, "max_continuous_days_allowed"
+            
         )
         
         if not max_days:
