@@ -176,12 +176,12 @@
    "default": "Draft",
    "fieldname": "status",
    "fieldtype": "Select",
-   "hidden": 1,
    "in_standard_filter": 1,
    "label": "Status",
    "no_copy": 1,
-   "options": "Draft\nPending Submission\nPending Supervisor Approval\nRejected By Supervisor\nPending HR Approval\nRejected By HR\nPending DAF Approval\nRejected By DAF\nPending DG approval\nApproved\nRejected",
-   "permlevel": 1
+   "options": "Draft\nPending Submission\nPending Supervisor Approval\nRejected By Supervisor\nPending HR Approval\nRejected By HR\nPending DAF Approval\nRejected By DAF\nPending MD Approval\nApproved\nRejected",
+   "permlevel": 1,
+   "read_only": 1
   },
   {
    "default": "Today",
@@ -270,7 +270,7 @@
  "is_submittable": 1,
  "links": [],
  "max_attachments": 3,
- "modified": "2025-06-25 15:49:32.332845",
+ "modified": "2025-11-13 14:24:53.086712",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "Leave Application",
@@ -300,15 +300,6 @@
    "role": "HR Manager",
    "set_user_permissions": 1,
    "share": 1,
-   "submit": 1,
-   "write": 1
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "permlevel": 1,
-   "read": 1,
-   "role": "All",
    "submit": 1,
    "write": 1
   },

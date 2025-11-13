@@ -2221,7 +2221,7 @@ def send_notification_levels(self):
             frappe.log_error(f"Error sending email to {daf_emails}: {str(e)}")
             
             return False
-    elif self.workflow_state == 'Pending DG approval':
+    elif self.workflow_state == 'Pending MD Approval':
         # Continue building the message
         message += f"""
                     <p>Dear HR</p><br/>

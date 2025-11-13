@@ -76,7 +76,7 @@ frappe.ui.form.on('Leave Application', {
       workflowState === "Pending Supervisor Approval" ||
       workflowState === "Pending HR Approval" ||
       workflowState === "Pending DAF Approval" ||
-      workflowState === "Pending DG approval" ||
+      workflowState === "Pending MD Approval" ||
       workflowState === "Approved"
     ) {
       let dialog = new frappe.ui.Dialog({
