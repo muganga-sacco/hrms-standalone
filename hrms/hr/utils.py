@@ -436,7 +436,6 @@ def get_monthly_earned_leave(
     divide_by_frequency = {"Yearly": 1, "Half-Yearly": 2, "Quarterly": 4, "Monthly": 12}
     if annual_leaves:
         earned_leaves = flt(annual_leaves) / divide_by_frequency[frequency]
-        frappe.log(earned_leaves)
 
         if pro_rated:
             if not (period_start_date or period_end_date):
