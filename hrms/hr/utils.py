@@ -512,23 +512,23 @@ def check_effective_date(from_date, today, frequency, allocate_on_day):
     today = frappe.flags.current_date or get_datetime(today)
     rd = relativedelta.relativedelta(today, from_date)
 
-    # expected_date = {
-    #     "First Day": get_first_day(today),
-    #     "Last Day": get_last_day(today),
-    #     "Date of Joining": from_date,
-    # }[allocate_on_day]
+    expected_date = {
+        "First Day": get_first_day(today),
+        "Last Day": get_last_day(today),
+        "Date of Joining": from_date,
+    }[allocate_on_day]
     
-    expected_date=today
+   
 
     if expected_date.day == today.day:
         if frequency == "Monthly":
             return True
-        # elif frequency == "Quarterly" and rd.months % 3:
-        #     return True
-        # elif frequency == "Half-Yearly" and rd.months % 6:
-        #     return True
-        # elif frequency == "Yearly" and rd.months % 12:
-        #     return True
+        elif frequency == "Quarterly" and rd.months % 3:
+            return True
+        elif frequency == "Half-Yearly" and rd.months % 6:
+            return True
+        elif frequency == "Yearly" and rd.months % 12:
+            return True
 
     return False
 
