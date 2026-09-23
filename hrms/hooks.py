@@ -39,11 +39,9 @@ app_include_css = "hrms.bundle.css"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {
-#     "Company": "public/js/erpnext/company.js",
-#     "Department": "public/js/erpnext/department.js",
-#     "Timesheet": "public/js/erpnext/timesheet.js",
-# }
+doctype_js = {
+	"Imported Payroll Record": "payroll/doctype/imported_payroll_record/imported_payroll_record_api.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

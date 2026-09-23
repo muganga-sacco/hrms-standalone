@@ -1,0 +1,160 @@
+{
+ "actions": [],
+ "autoname": "format:HR-PEU-{YYYY}-{#####}",
+ "creation": "2026-09-22 12:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Other",
+ "engine": "InnoDB",
+  "field_order": [
+  "company",
+  "payroll_period_label",
+  "payroll_month",
+  "column_break_1",
+  "status",
+  "imported_records",
+  "section_break_sheet_meta",
+  "payroll_sheet_logo",
+  "payroll_sheet_footer",
+  "section_break_file",
+  "payroll_file",
+  "section_break_log",
+  "import_log"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "payroll_period_label",
+   "fieldtype": "Data",
+   "label": "Pay Period",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payroll_month",
+   "fieldtype": "Date",
+   "label": "Payroll Month",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Draft\nImported\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "imported_records",
+   "fieldtype": "Int",
+   "label": "Imported Records",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_sheet_meta",
+   "fieldtype": "Section Break",
+   "label": "Sheet Layout (from Excel)",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "payroll_sheet_logo",
+   "fieldtype": "Attach Image",
+   "label": "Sheet Logo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payroll_sheet_footer",
+   "fieldtype": "JSON",
+   "label": "Sheet Footer & Signatures",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_file",
+   "fieldtype": "Section Break",
+   "label": "Excel File"
+  },
+  {
+   "fieldname": "payroll_file",
+   "fieldtype": "Attach",
+   "label": "Payroll Excel File",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_log",
+   "fieldtype": "Section Break",
+   "label": "Log"
+  },
+  {
+   "fieldname": "import_log",
+   "fieldtype": "Long Text",
+   "label": "Import Log",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [
+  {
+   "group": "Records",
+   "link_doctype": "Imported Payroll Record",
+   "link_fieldname": "payroll_excel_upload"
+  }
+ ],
+ "modified": "2026-09-22 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Payroll",
+ "name": "Payroll Excel Upload",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "show_name_in_global_search": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

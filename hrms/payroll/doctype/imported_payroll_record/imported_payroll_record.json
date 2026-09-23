@@ -1,0 +1,389 @@
+{
+ "actions": [],
+ "autoname": "format:IPR-{employee_id_number}-{payroll_month}",
+ "creation": "2026-09-22 12:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Other",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee_section",
+  "employee_id_number",
+  "employee_name",
+  "employee",
+  "position",
+  "department",
+  "date_of_joining",
+  "column_break_emp",
+  "payroll_excel_upload",
+  "payroll_period_label",
+  "payroll_month",
+  "payment_date",
+  "company",
+  "currency",
+  "section_break_amounts",
+  "basic_salary",
+  "transport_allowance",
+  "itc_allowance",
+  "ict_allowance",
+  "gross_salary",
+  "column_break_ded",
+  "paye",
+  "pension_employee",
+  "pension_employer",
+  "oh_employer",
+  "maternity_employee",
+  "maternity_employer",
+  "net_before_cbhi",
+  "cbhi",
+  "net_salary",
+  "section_break_other",
+  "muganga_sacco_social_fund",
+  "rpf",
+  "brd_loan",
+  "sport_subscription",
+  "insurance_sanlam",
+  "insurance_prime",
+  "other_deductions",
+  "total_deductions",
+  "net_paid",
+  "compulsory_saving",
+  "compulsory_saving_account",
+  "take_home",
+  "account_number",
+  "bank",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee_section",
+   "fieldtype": "Section Break",
+   "label": "Employee"
+  },
+  {
+   "fieldname": "employee_id_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "ID Number",
+   "reqd": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "label": "Employee",
+   "options": "Employee"
+  },
+  {
+   "fieldname": "position",
+   "fieldtype": "Data",
+   "label": "Position"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Data",
+   "label": "Department"
+  },
+  {
+   "fieldname": "date_of_joining",
+   "fieldtype": "Date",
+   "label": "Date of Joining"
+  },
+  {
+   "fieldname": "column_break_emp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "payroll_excel_upload",
+   "fieldtype": "Link",
+   "label": "Payroll Excel Upload",
+   "options": "Payroll Excel Upload",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payroll_period_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Pay Period",
+   "reqd": 1
+  },
+  {
+   "fieldname": "payroll_month",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Payroll Month",
+   "reqd": 1
+  },
+  {
+   "fieldname": "payment_date",
+   "fieldtype": "Date",
+   "label": "Payment Date"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fetch_from": "company.default_currency",
+   "fetch_if_empty": 1,
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_amounts",
+   "fieldtype": "Section Break",
+   "label": "Earnings"
+  },
+  {
+   "fieldname": "basic_salary",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Basic Salary"
+  },
+  {
+   "fieldname": "transport_allowance",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Transport Allowance"
+  },
+  {
+   "fieldname": "itc_allowance",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "ITC Allowance"
+  },
+  {
+   "fieldname": "ict_allowance",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "ICT Allowance"
+  },
+  {
+   "fieldname": "gross_salary",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Gross Salary"
+  },
+  {
+   "fieldname": "column_break_ded",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "paye",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "PAYE"
+  },
+  {
+   "fieldname": "pension_employee",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Pension Employee"
+  },
+  {
+   "fieldname": "pension_employer",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Pension Employer"
+  },
+  {
+   "fieldname": "oh_employer",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "OH Employer"
+  },
+  {
+   "fieldname": "maternity_employee",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Maternity Employee"
+  },
+  {
+   "fieldname": "maternity_employer",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Maternity Employer"
+  },
+  {
+   "fieldname": "net_before_cbhi",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Net Before CBHI"
+  },
+  {
+   "fieldname": "cbhi",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "CBHI"
+  },
+  {
+   "fieldname": "net_salary",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Net Salary"
+  },
+  {
+   "fieldname": "section_break_other",
+   "fieldtype": "Section Break",
+   "label": "Other Deductions & Payment"
+  },
+  {
+   "fieldname": "muganga_sacco_social_fund",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Muganga Sacco Social Fund"
+  },
+  {
+   "fieldname": "rpf",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "RPF"
+  },
+  {
+   "fieldname": "brd_loan",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "BRD Scholar Loan"
+  },
+  {
+   "fieldname": "sport_subscription",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Sport Subscription"
+  },
+  {
+   "fieldname": "insurance_sanlam",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Insurance Sanlam"
+  },
+  {
+   "fieldname": "insurance_prime",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Insurance Prime"
+  },
+  {
+   "fieldname": "other_deductions",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Other Deductions"
+  },
+  {
+   "fieldname": "total_deductions",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Total Deductions"
+  },
+  {
+   "fieldname": "net_paid",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Net Paid"
+  },
+  {
+   "fieldname": "compulsory_saving",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Compulsory Saving"
+  },
+  {
+   "fieldname": "compulsory_saving_account",
+   "fieldtype": "Data",
+   "label": "Compulsory Saving Account"
+  },
+  {
+   "fieldname": "take_home",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Take Home"
+  },
+  {
+   "fieldname": "account_number",
+   "fieldtype": "Data",
+   "label": "Account Number"
+  },
+  {
+   "fieldname": "bank",
+   "fieldtype": "Data",
+   "label": "Beneficiary Bank"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Imported Payroll Record",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-09-22 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Payroll",
+ "name": "Imported Payroll Record",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "show_name_in_global_search": 1,
+ "sort_field": "payroll_month",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

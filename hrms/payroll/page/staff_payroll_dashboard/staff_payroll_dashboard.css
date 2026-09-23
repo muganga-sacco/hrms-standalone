@@ -1,0 +1,83 @@
+.staff-payroll-dashboard {
+	padding: 0.5rem 0;
+}
+
+.staff-payroll-dashboard .toolbar-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: flex-end;
+	margin-bottom: 1rem;
+}
+
+.staff-payroll-dashboard .sheet-wrap {
+	overflow: auto;
+	max-height: calc(100vh - 220px);
+	border: 1px solid #d1d8dd;
+	background: #fff;
+}
+
+.staff-payroll-dashboard .sheet-title {
+	text-align: center;
+	font-weight: 700;
+	font-size: 16px;
+	padding: 12px 8px;
+	border-bottom: 1px solid #000;
+	background: #fff;
+}
+
+.staff-payroll-dashboard table.payroll-sheet {
+	border-collapse: collapse;
+	width: max-content;
+	min-width: 100%;
+	font-size: 11px;
+}
+
+.staff-payroll-dashboard table.payroll-sheet th,
+.staff-payroll-dashboard table.payroll-sheet td {
+	border: 1px solid #000;
+	padding: 4px 6px;
+	text-align: center;
+	white-space: nowrap;
+	vertical-align: middle;
+}
+
+.staff-payroll-dashboard table.payroll-sheet thead th {
+	background: #f3f3f3;
+	font-weight: 600;
+}
+
+.staff-payroll-dashboard .hdr-rssb {
+	background: #e8e8e8;
+}
+
+.staff-payroll-dashboard .hdr-insurance {
+	background: #e8e8e8;
+}
+
+.staff-payroll-dashboard .col-yellow {
+	background: #ffff00;
+}
+
+.staff-payroll-dashboard .col-green {
+	background: #c6efce;
+}
+
+.staff-payroll-dashboard .col-deductions {
+	background: #fcd5b4;
+}
+
+.staff-payroll-dashboard tr.grand-total td {
+	font-weight: 700;
+	background: #fde9d9;
+}
+
+.staff-payroll-dashboard td.num {
+	text-align: right;
+}
+
+.staff-payroll-dashboard .empty-state {
+	padding: 3rem;
+	text-align: center;
+	color: #74808b;
+}
