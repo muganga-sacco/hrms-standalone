@@ -9,6 +9,9 @@ from hrms.payroll.payroll_import.payroll_month_export import EXPORT_COLUMNS
 
 
 def execute(filters=None):
+	from hrms.payroll.payroll_import.payroll_access import throw_if_not_hr_payroll
+
+	throw_if_not_hr_payroll()
 	filters = filters or {}
 	columns = _get_columns()
 	data = _get_data(filters)
@@ -61,7 +64,9 @@ def _get_data(filters):
 			[getdate(filters["from_month"]), getdate(filters["to_month"])],
 		]
 	elif filters.get("payroll_month"):
-		query_filters["payroll_month"] = getdate(filters["payroll_month"])
+		from hrms.payroll.payroll_import.payroll_month_utils import normalize_payroll_month
+
+		query_filters["payroll_month"] = normalize_payroll_month(filters["payroll_month"])
 
 	fields = ["employee_id_number", "employee_name"] + [f[0] for f in EXPORT_COLUMNS[2:]]
 

@@ -17,6 +17,14 @@
 	background: #fff;
 }
 
+.staff-payroll-dashboard .sheet-filter-hint {
+	font-size: 11px;
+	color: var(--text-muted, #6c757d);
+	padding: 6px 10px;
+	border-bottom: 1px solid #e8e8e8;
+	background: #fafbfc;
+}
+
 .staff-payroll-dashboard .sheet-title {
 	text-align: center;
 	font-weight: 700;
@@ -31,6 +39,10 @@
 	width: max-content;
 	min-width: 100%;
 	font-size: 11px;
+}
+
+.staff-payroll-dashboard table.payroll-sheet-lumpsum {
+	min-width: 960px;
 }
 
 .staff-payroll-dashboard table.payroll-sheet th,

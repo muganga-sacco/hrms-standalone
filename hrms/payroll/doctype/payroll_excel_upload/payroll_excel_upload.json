@@ -7,6 +7,7 @@
  "engine": "InnoDB",
   "field_order": [
   "company",
+  "payroll_sheet_type",
   "payroll_period_label",
   "payroll_month",
   "column_break_1",
@@ -29,16 +30,24 @@
    "reqd": 1
   },
   {
+   "default": "Auto Detect",
+   "fieldname": "payroll_sheet_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Payroll Sheet Type",
+   "options": "Auto Detect\nStaff Payroll\nLumpsum"
+  },
+  {
    "fieldname": "payroll_period_label",
    "fieldtype": "Data",
    "label": "Pay Period",
    "read_only": 1
   },
   {
+   "description": "Pick the month for this import (use the 1st or any day in that month). Required when the Excel title does not include a month.",
    "fieldname": "payroll_month",
    "fieldtype": "Date",
-   "label": "Payroll Month",
-   "read_only": 1
+   "label": "Payroll Month"
   },
   {
    "fieldname": "column_break_1",
@@ -115,18 +124,6 @@
  "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "System Manager",
-   "share": 1,
-   "write": 1
-  },
   {
    "create": 1,
    "delete": 1,

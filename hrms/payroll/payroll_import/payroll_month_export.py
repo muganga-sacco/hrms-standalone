@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_months, getdate
 
+from hrms.payroll.payroll_import.payroll_month_utils import normalize_payroll_month
 from hrms.payroll.payroll_import.payroll_sheet_layout import (
 	ensure_payroll_sheet_layout,
 	get_company_logo_path,
@@ -20,6 +21,7 @@ DATA_COLUMNS: list[tuple[str | None, str, bool]] = [
 	("employee_id_number", "ID NUMBER", False),
 	("employee_name", "NAMES", False),
 	("date_of_joining", "Date of Joining", False),
+	("department", "DEPARTMENT", False),
 	("position", "POSITION", False),
 	("basic_salary", "Basic salary", True),
 	("transport_allowance", "Transport allowance CRO", True),
@@ -62,8 +64,29 @@ RSSB_LABELS = {
 }
 INSURANCE_LABELS = {"Sanlam", "Prime"}
 
+LUMPSUM_DATA_COLUMNS: list[tuple[str | None, str, bool]] = [
+	("employee_id_number", "ID NUMBER", False),
+	("employee_name", "NAMES", False),
+	("date_of_joining", "Date of Joining", False),
+	("department", "DEPARTMENT", False),
+	("position", "POSITION", False),
+	("gross_salary", "Gross Lumpsum", True),
+	("paye", "PAYE(PAY AS YOU EARN)", True),
+	("pension_employee", "Pension Employee 6%", True),
+	("pension_employer", "Pension Employer 6%", True),
+	("net_salary", "Net Salary", True),
+	("account_number", "Account Number", False),
+	("bank", "Beneficiary Bank", False),
+]
 
-def build_payroll_month_excel(payroll_month: str, company: str | None = None) -> bytes:
+
+def build_payroll_month_excel(
+	payroll_month: str,
+	company: str | None = None,
+	payroll_sheet_type: str = "Staff Payroll",
+) -> bytes:
+	if payroll_sheet_type == "Lumpsum":
+		return build_lumpsum_month_excel(payroll_month, company=company)
 	try:
 		from openpyxl import Workbook
 		from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -71,14 +94,17 @@ def build_payroll_month_excel(payroll_month: str, company: str | None = None) ->
 	except ImportError:
 		frappe.throw(_("openpyxl is required. Install: pip install openpyxl"))
 
-	month = getdate(payroll_month)
-	records = _fetch_records(month, company)
+	month = normalize_payroll_month(payroll_month)
+	if not month:
+		frappe.throw(_("Payroll Month is required."))
+	records = _fetch_records(month, company, "Staff Payroll")
 	if not records:
 		frappe.throw(_("No submitted payroll records for {0}.").format(month.strftime("%B %Y")))
 
+	effective_company = company or records[0].get("company")
 	period_label = records[0].get("payroll_period_label") or month.strftime("%B %Y")
 	prev_month = getdate(add_months(month, -1))
-	prev_records = _fetch_records(prev_month, company)
+	prev_records = _fetch_records(prev_month, effective_company, "Staff Payroll")
 
 	wb = Workbook()
 	ws = wb.active
@@ -94,9 +120,9 @@ def build_payroll_month_excel(payroll_month: str, company: str | None = None) ->
 	title_font = Font(bold=True, size=14)
 	header_font = Font(bold=True, size=9)
 
-	payroll_excel_upload = get_payroll_excel_upload_for_month(company, month)
-	ensure_payroll_sheet_layout(payroll_excel_upload)
-	logo_path = get_company_logo_path(company, payroll_excel_upload)
+	payroll_excel_upload = get_payroll_excel_upload_for_month(effective_company, month, "Staff Payroll")
+	ensure_payroll_sheet_layout(payroll_excel_upload, allow_sync=False)
+	logo_path = get_company_logo_path(effective_company, payroll_excel_upload)
 	if logo_path:
 		try:
 			from openpyxl.drawing.image import Image as XLImage
@@ -202,7 +228,7 @@ def build_payroll_month_excel(payroll_month: str, company: str | None = None) ->
 				cell.fill = green_fill
 		row_num += 1
 
-	current_totals = _sum_numeric_columns(records)
+	current_totals = _sum_numeric_columns_for(records, DATA_COLUMNS)
 	if len(records) > 1:
 		_write_total_row(ws, row_num, "S/TOTAL1", current_totals, border, Font(bold=True, size=9))
 		row_num += 1
@@ -213,7 +239,7 @@ def build_payroll_month_excel(payroll_month: str, company: str | None = None) ->
 	row_num += 1
 
 	if prev_records:
-		prev_totals = _sum_numeric_columns(prev_records)
+		prev_totals = _sum_numeric_columns_for(prev_records, DATA_COLUMNS)
 		_write_total_row(
 			ws,
 			row_num,
@@ -229,21 +255,10 @@ def build_payroll_month_excel(payroll_month: str, company: str | None = None) ->
 		)
 		row_num += 1
 
-	footer = get_payroll_sheet_footer(
-		company, payroll_month=month, payroll_excel_upload=payroll_excel_upload
+	footer = _export_footer(
+		effective_company, month, payroll_excel_upload, payroll_sheet_type="Staff Payroll"
 	)
-	row_num += 2
-	ws.merge_cells(start_row=row_num, start_column=2, end_row=row_num, end_column=last_col)
-	ws.cell(row=row_num, column=2, value=footer["date_line"]).font = Font(size=10)
-
-	row_num += 2
-	sig_cols = [2, max(2, last_col // 3), max(2, (2 * last_col) // 3)]
-	for idx, sig in enumerate(footer["signatures"][:3]):
-		col = sig_cols[idx] if idx < len(sig_cols) else 2 + idx * 8
-		cell = ws.cell(row=row_num, column=col, value=sig["heading"])
-		cell.font = Font(bold=True, size=9)
-		ws.cell(row=row_num + 1, column=col, value=sig["name"]).font = Font(bold=True, size=9)
-		ws.cell(row=row_num + 2, column=col, value=sig["title"]).font = Font(size=9)
+	row_num = _append_sheet_footer(ws, row_num, footer, last_col)
 
 	ws.column_dimensions["A"].width = 5
 	for i in range(2, last_col + 1):
@@ -255,12 +270,212 @@ def build_payroll_month_excel(payroll_month: str, company: str | None = None) ->
 	return buffer.getvalue()
 
 
-def _fetch_records(month, company: str | None):
+def build_lumpsum_month_excel(payroll_month: str, company: str | None = None) -> bytes:
+	try:
+		from openpyxl import Workbook
+		from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+		from openpyxl.utils import get_column_letter
+	except ImportError:
+		frappe.throw(_("openpyxl is required. Install: pip install openpyxl"))
+
+	month = normalize_payroll_month(payroll_month)
+	if not month:
+		frappe.throw(_("Payroll Month is required."))
+	records = _fetch_records(month, company, "Lumpsum")
+	if not records:
+		frappe.throw(_("No submitted lumpsum payroll records for {0}.").format(month.strftime("%B %Y")))
+
+	effective_company = company or records[0].get("company")
+	period_label = records[0].get("payroll_period_label") or month.strftime("%B %Y")
+	title_text = period_label.upper()
+	if "LUMPSUM" not in title_text:
+		title_text = f"LUMPSUM PAYROLL {title_text}"
+
+	wb = Workbook()
+	ws = wb.active
+	ws.title = "LUMPSUM"
+	last_col = 1 + len(LUMPSUM_DATA_COLUMNS)
+	thin = Side(style="thin", color="000000")
+	border = Border(left=thin, right=thin, top=thin, bottom=thin)
+	header_fill = PatternFill("solid", fgColor="D9D9D9")
+	yellow_fill = PatternFill("solid", fgColor="FFF2CC")
+	green_fill = PatternFill("solid", fgColor="C6E0B4")
+	title_font = Font(bold=True, size=14)
+	header_font = Font(bold=True, size=9)
+
+	payroll_excel_upload = get_payroll_excel_upload_for_month(effective_company, month, "Lumpsum")
+	ensure_payroll_sheet_layout(payroll_excel_upload, allow_sync=False)
+	logo_path = get_company_logo_path(effective_company, payroll_excel_upload)
+	if not logo_path and effective_company:
+		staff_upload = get_payroll_excel_upload_for_month(effective_company, month, "Staff Payroll")
+		logo_path = get_company_logo_path(effective_company, staff_upload)
+	if logo_path:
+		try:
+			from openpyxl.drawing.image import Image as XLImage
+
+			img = XLImage(logo_path)
+			img.height = 90
+			img.width = 200
+			ws.add_image(img, "A1")
+			for r in range(1, 7):
+				ws.row_dimensions[r].height = 18
+		except Exception:
+			frappe.log_error(title="Lumpsum Excel Logo")
+
+	title_row = 7
+	h1, h2 = 8, 9
+	data_start = 10
+
+	ws.merge_cells(start_row=title_row, start_column=2, end_row=title_row, end_column=last_col)
+	title_cell = ws.cell(row=title_row, column=2, value=title_text)
+	title_cell.font = title_font
+	title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+	pension_cols = []
+	for idx, (_f, label, _n) in enumerate(LUMPSUM_DATA_COLUMNS, start=2):
+		if label.startswith("Pension"):
+			pension_cols.append(idx)
+
+	def style_header(cell, fill=None):
+		cell.font = header_font
+		cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+		cell.border = border
+		cell.fill = fill or header_fill
+
+	ws.cell(row=h1, column=1, value="S/N")
+	ws.merge_cells(start_row=h1, start_column=1, end_row=h2, end_column=1)
+	style_header(ws.cell(row=h1, column=1))
+
+	for col in range(2, last_col + 1):
+		label = LUMPSUM_DATA_COLUMNS[col - 2][1]
+		if col in pension_cols:
+			if col == pension_cols[0]:
+				ws.merge_cells(start_row=h1, start_column=pension_cols[0], end_row=h1, end_column=pension_cols[-1])
+				c = ws.cell(row=h1, column=pension_cols[0], value="RSSB CONTRIBUTIONS")
+				style_header(c)
+			c = ws.cell(row=h2, column=col, value=label)
+			style_header(c)
+			continue
+		ws.merge_cells(start_row=h1, start_column=col, end_row=h2, end_column=col)
+		c = ws.cell(row=h1, column=col, value=label)
+		if label == "Net Salary":
+			style_header(c, yellow_fill)
+		elif label == "Beneficiary Bank":
+			style_header(c, green_fill)
+		else:
+			style_header(c)
+
+	row_num = data_start
+	for sn, record in enumerate(records, start=1):
+		ws.cell(row=row_num, column=1, value=sn).border = border
+		for cidx, (field, col_label, is_num) in enumerate(LUMPSUM_DATA_COLUMNS, start=2):
+			val = record.get(field) if field else None
+			if field == "date_of_joining" and val:
+				val = getdate(val).strftime("%d-%m-%Y")
+			elif is_num and val is not None:
+				val = round(float(val), 2)
+			cell = ws.cell(row=row_num, column=cidx, value=val)
+			cell.border = border
+			if col_label == "Net Salary":
+				cell.fill = yellow_fill
+			elif col_label == "Beneficiary Bank":
+				cell.fill = green_fill
+		row_num += 1
+
+	totals = _sum_numeric_columns_for(records, LUMPSUM_DATA_COLUMNS)
+	_write_total_row(
+		ws,
+		row_num,
+		f"GRAND TOTAL_{month.strftime('%B').upper()} {month.year}",
+		totals,
+		border,
+		Font(bold=True, size=9),
+		columns=LUMPSUM_DATA_COLUMNS,
+	)
+	row_num += 1
+
+	footer = _export_footer(
+		effective_company, month, payroll_excel_upload, payroll_sheet_type="Lumpsum"
+	)
+	row_num = _append_sheet_footer(ws, row_num, footer, last_col)
+
+	ws.column_dimensions["A"].width = 5
+	for i in range(2, last_col + 1):
+		ws.column_dimensions[get_column_letter(i)].width = 11
+
+	buffer = io.BytesIO()
+	wb.save(buffer)
+	buffer.seek(0)
+	return buffer.getvalue()
+
+
+def _export_footer(
+	company: str | None,
+	month,
+	payroll_excel_upload: str | None,
+	payroll_sheet_type: str = "Staff Payroll",
+) -> dict:
+	footer = get_payroll_sheet_footer(
+		company,
+		payroll_month=month,
+		payroll_excel_upload=payroll_excel_upload,
+		payroll_sheet_type=payroll_sheet_type,
+	)
+	if (
+		payroll_sheet_type == "Lumpsum"
+		and not (footer.get("signatures") or [])
+		and company
+	):
+		staff_upload = get_payroll_excel_upload_for_month(company, month, "Staff Payroll")
+		if staff_upload:
+			staff_footer = get_payroll_sheet_footer(
+				company, payroll_month=month, payroll_excel_upload=staff_upload
+			)
+			if staff_footer.get("signatures"):
+				footer = staff_footer
+	elif not (footer.get("signatures") or []) and company:
+		staff_upload = get_payroll_excel_upload_for_month(company, month, "Staff Payroll")
+		if staff_upload and staff_upload != payroll_excel_upload:
+			staff_footer = get_payroll_sheet_footer(
+				company, payroll_month=month, payroll_excel_upload=staff_upload
+			)
+			if staff_footer.get("signatures"):
+				footer = staff_footer
+	return footer
+
+
+def _append_sheet_footer(ws, row_num: int, footer: dict, last_col: int) -> int:
+	from openpyxl.styles import Font
+
+	date_line = (footer or {}).get("date_line") or ""
+	signatures = (footer or {}).get("signatures") or []
+	row_num += 2
+	if date_line:
+		ws.merge_cells(start_row=row_num, start_column=2, end_row=row_num, end_column=last_col)
+		ws.cell(row=row_num, column=2, value=date_line).font = Font(size=10)
+		row_num += 2
+	if signatures:
+		sig_cols = [2, max(2, last_col // 3), max(2, (2 * last_col) // 3)]
+		for idx, sig in enumerate(signatures[:3]):
+			col = sig_cols[idx] if idx < len(sig_cols) else 2 + idx * 8
+			cell = ws.cell(row=row_num, column=col, value=sig.get("heading") or "")
+			cell.font = Font(bold=True, size=9)
+			ws.cell(row=row_num + 1, column=col, value=sig.get("name") or "").font = Font(bold=True, size=9)
+			ws.cell(row=row_num + 2, column=col, value=sig.get("title") or "").font = Font(size=9)
+		row_num += 3
+	return row_num
+
+
+def _fetch_records(month, company: str | None, payroll_sheet_type: str | None = None):
 	filters: dict = {"docstatus": 1, "payroll_month": month}
 	if company:
 		filters["company"] = company
-	fields = list({col[0] for col in DATA_COLUMNS if col[0]})
+	if payroll_sheet_type and payroll_sheet_type not in ("All", ""):
+		filters["payroll_sheet_type"] = payroll_sheet_type
+	col_source = LUMPSUM_DATA_COLUMNS if payroll_sheet_type == "Lumpsum" else DATA_COLUMNS
+	fields = list({col[0] for col in col_source if col[0]})
 	fields.append("payroll_period_label")
+	fields.append("company")
 	return frappe.get_all(
 		"Imported Payroll Record",
 		filters=filters,
@@ -269,9 +484,11 @@ def _fetch_records(month, company: str | None):
 	)
 
 
-def _sum_numeric_columns(records: list[dict]) -> dict[int, float]:
+def _sum_numeric_columns_for(
+	records: list[dict], columns: list[tuple[str | None, str, bool]]
+) -> dict[int, float]:
 	totals: dict[int, float] = {}
-	for cidx, (field, _label, is_num) in enumerate(DATA_COLUMNS, start=2):
+	for cidx, (field, _label, is_num) in enumerate(columns, start=2):
 		if not is_num or not field:
 			continue
 		total = 0.0
@@ -284,15 +501,16 @@ def _sum_numeric_columns(records: list[dict]) -> dict[int, float]:
 	return totals
 
 
-def _write_total_row(ws, row_num, label, totals, border, font):
+def _write_total_row(ws, row_num, label, totals, border, font, columns=None):
 	from openpyxl.styles import PatternFill
 
+	columns = columns or DATA_COLUMNS
 	header_fill = PatternFill("solid", fgColor="FDE9D9")
 	yellow_fill = PatternFill("solid", fgColor="FFF2CC")
 	green_fill = PatternFill("solid", fgColor="C6E0B4")
 	ws.cell(row=row_num, column=1, value=label).font = font
 	ws.cell(row=row_num, column=1).border = border
-	for cidx, (_field, col_label, is_num) in enumerate(DATA_COLUMNS, start=2):
+	for cidx, (_field, col_label, is_num) in enumerate(columns, start=2):
 		cell = ws.cell(row=row_num, column=cidx)
 		cell.border = border
 		cell.font = font

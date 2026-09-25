@@ -41,6 +41,16 @@ app_include_css = "hrms.bundle.css"
 # include js in doctype views
 doctype_js = {
 	"Imported Payroll Record": "payroll/doctype/imported_payroll_record/imported_payroll_record_api.js",
+	"Payslip Request": "payroll/doctype/payslip_request/payslip_request.js",
+}
+doctype_list_js = {
+	"Payslip Request": "payroll/doctype/payslip_request/payslip_request_list.js",
+}
+permission_query_conditions = {
+	"Payslip Request": "hrms.payroll.doctype.payslip_request.payslip_request.get_permission_query_conditions",
+}
+has_permission = {
+	"Payslip Request": "hrms.payroll.doctype.payslip_request.payslip_request.has_permission",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -53,9 +63,11 @@ doctype_js = {
 # home_page = "login"
 
 # website user home page (by Role)
-# role_home_page = {
-# 	"Role": "home_page"
-# }
+role_home_page = {
+	"Employee": "My Payslips",
+}
+
+extend_bootinfo = "hrms.payroll.payroll_import.payroll_boot.extend_bootinfo"
 
 calendars = ["Leave Application"]
 
@@ -83,7 +95,10 @@ jinja = {
 
 # before_install = "hrms.install.before_install"
 after_install = "hrms.install.after_install"
-after_migrate = "basic.setup.update_select_perm_after_install"
+after_migrate = [
+	"basic.setup.update_select_perm_after_install",
+	"hrms.payroll.setup.ensure_payroll_dashboard_permissions.ensure_payroll_dashboard_permissions",
+]
 
 # Uninstallation
 # ------------

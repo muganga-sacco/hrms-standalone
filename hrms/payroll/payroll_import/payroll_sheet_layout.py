@@ -135,13 +135,24 @@ def get_company_logo_path(company: str | None, payroll_excel_upload: str | None 
 	return _bundled_logo_path()
 
 
-def get_payroll_excel_upload_for_month(company: str | None, payroll_month) -> str | None:
+def get_payroll_excel_upload_for_month(
+	company: str | None,
+	payroll_month,
+	payroll_sheet_type: str | None = None,
+) -> str | None:
+	from hrms.payroll.payroll_import.payroll_month_utils import normalize_payroll_month
+
 	if not company or not payroll_month:
 		return None
-	month = getdate(payroll_month)
+	month = normalize_payroll_month(payroll_month)
+	if not month:
+		return None
+	filters: dict = {"company": company, "payroll_month": month, "status": "Imported"}
+	if payroll_sheet_type and payroll_sheet_type not in ("All", ""):
+		filters["payroll_sheet_type"] = payroll_sheet_type
 	rows = frappe.get_all(
 		"Payroll Excel Upload",
-		filters={"company": company, "payroll_month": month, "status": "Imported"},
+		filters=filters,
 		fields=["name"],
 		order_by="modified desc",
 		limit=1,
@@ -204,9 +215,12 @@ def get_payroll_sheet_footer(
 	on_date: date | None = None,
 	payroll_month=None,
 	payroll_excel_upload: str | None = None,
+	payroll_sheet_type: str | None = None,
 ) -> dict:
 	if not payroll_excel_upload and company and payroll_month:
-		payroll_excel_upload = get_payroll_excel_upload_for_month(company, payroll_month)
+		payroll_excel_upload = get_payroll_excel_upload_for_month(
+			company, payroll_month, payroll_sheet_type
+		)
 
 	stored = _normalize_footer(_load_footer_from_upload(payroll_excel_upload))
 	if stored:
@@ -230,10 +244,16 @@ def get_payroll_sheet_header(
 	company: str | None,
 	period_label: str,
 	payroll_excel_upload: str | None = None,
+	payroll_sheet_type: str | None = "Staff Payroll",
 ) -> dict:
 	logo_url = get_company_logo_url(company, payroll_excel_upload)
+	period_upper = (period_label or "").upper()
+	if payroll_sheet_type == "Lumpsum":
+		title = f"LUMPSUM PAYROLL {period_upper}" if period_upper else "LUMPSUM PAYROLL"
+	else:
+		title = f"STAFF PAYROLL {period_upper}" if period_upper else "STAFF PAYROLL"
 	return {
-		"title": f"STAFF PAYROLL {period_label.upper()}",
+		"title": title,
 		"company": company,
 		"company_name": frappe.db.get_value("Company", company, "name") if company else None,
 		"logo_url": logo_url,
@@ -307,14 +327,41 @@ def save_payroll_sheet_logo_from_excel(file_path: str, payroll_excel_upload: str
 	return file_doc.file_url
 
 
+def _set_payroll_excel_upload_layout_fields(
+	payroll_excel_upload: str,
+	*,
+	period_label: str | None = None,
+	footer: dict | None = None,
+) -> None:
+	"""Write layout fields without Document.save() (avoids timestamp conflicts)."""
+	values: dict = {}
+	if period_label:
+		values["payroll_period_label"] = period_label
+	if footer is not None:
+		values["payroll_sheet_footer"] = footer
+	if not values:
+		return
+	frappe.db.set_value(
+		"Payroll Excel Upload",
+		payroll_excel_upload,
+		values,
+		update_modified=False,
+	)
+
+
 def sync_payroll_sheet_layout_from_upload(payroll_excel_upload: str) -> bool:
 	"""Parse attached workbook and store sheet logo + footer on Payroll Excel Upload."""
 	if not payroll_excel_upload:
 		return False
-	doc = frappe.get_doc("Payroll Excel Upload", payroll_excel_upload)
-	if not doc.payroll_file:
+	row = frappe.db.get_value(
+		"Payroll Excel Upload",
+		payroll_excel_upload,
+		["payroll_file", "payroll_period_label", "company"],
+		as_dict=True,
+	)
+	if not row or not row.payroll_file:
 		return False
-	file_path = frappe.get_doc("File", {"file_url": doc.payroll_file}).get_full_path()
+	file_path = frappe.get_doc("File", {"file_url": row.payroll_file}).get_full_path()
 	if not file_path or not os.path.exists(file_path):
 		return False
 
@@ -326,19 +373,24 @@ def sync_payroll_sheet_layout_from_upload(payroll_excel_upload: str) -> bool:
 		frappe.log_error(title="Refresh payroll sheet layout")
 		return False
 
-	if parsed.get("sheet_footer"):
-		doc.payroll_sheet_footer = parsed["sheet_footer"]
-		doc.flags.ignore_permissions = True
-		doc.save()
+	sheet_title = (parsed.get("sheet_title") or "").strip()
+	current_label = (row.payroll_period_label or "").strip()
+	period_label = sheet_title if sheet_title and len(sheet_title) > len(current_label) else None
+	footer = parsed.get("sheet_footer")
+	if period_label or footer:
+		_set_payroll_excel_upload_layout_fields(
+			payroll_excel_upload, period_label=period_label, footer=footer
+		)
 	save_payroll_sheet_logo_from_excel(file_path, payroll_excel_upload)
-	if doc.company:
-		sync_company_logo_from_payroll_excel(file_path, doc.company)
+	if row.company:
+		sync_company_logo_from_payroll_excel(file_path, row.company)
 	frappe.db.commit()
 	return True
 
 
-def ensure_payroll_sheet_layout(payroll_excel_upload: str | None) -> None:
-	if not payroll_excel_upload:
+def ensure_payroll_sheet_layout(payroll_excel_upload: str | None, *, allow_sync: bool = True) -> None:
+	"""Optionally backfill logo/footer from Excel. Disabled during dashboard reads by default."""
+	if not payroll_excel_upload or not allow_sync:
 		return
 	meta = frappe.get_meta("Payroll Excel Upload")
 	if not meta.has_field("payroll_sheet_footer"):
@@ -351,7 +403,14 @@ def ensure_payroll_sheet_layout(payroll_excel_upload: str | None) -> None:
 	)
 	if row and row.payroll_sheet_logo and row.payroll_sheet_footer:
 		return
-	sync_payroll_sheet_layout_from_upload(payroll_excel_upload)
+	lock_key = f"payroll_sheet_layout_sync:{payroll_excel_upload}"
+	if frappe.cache().get_value(lock_key):
+		return
+	frappe.cache().set_value(lock_key, 1, expires_in_sec=120)
+	try:
+		sync_payroll_sheet_layout_from_upload(payroll_excel_upload)
+	finally:
+		frappe.cache().delete_value(lock_key)
 
 
 def sync_company_logo_from_payroll_excel(file_path: str, company: str | None) -> bool:

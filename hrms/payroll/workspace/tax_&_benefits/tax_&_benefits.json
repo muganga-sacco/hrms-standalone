@@ -141,7 +141,20 @@
  "parent_page": "Payroll",
  "public": 1,
  "quick_lists": [],
- "roles": [],
+ "roles": [
+  {
+   "role": "HR Manager"
+  },
+  {
+   "role": "HR User"
+  },
+  {
+   "role": "DAF"
+  },
+  {
+   "role": "MD"
+  }
+ ],
  "sequence_id": 38.0,
  "shortcuts": [
   {

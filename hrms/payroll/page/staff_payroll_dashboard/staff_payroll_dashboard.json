@@ -18,7 +18,10 @@
    "role": "HR User"
   },
   {
-   "role": "System Manager"
+   "role": "DAF"
+  },
+  {
+   "role": "MD"
   }
  ],
  "standard": "Yes",

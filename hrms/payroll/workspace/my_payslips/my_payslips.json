@@ -1,0 +1,87 @@
+{
+ "charts": [],
+ "content": "[{\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Request a payslip</b></span>\",\"col\":12}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"New Payslip Request\",\"col\":4}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"My Payslip Requests\",\"col\":4}},{\"type\":\"spacer\",\"data\":{\"col\":12}},{\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>My requests</b></span>\",\"col\":12}},{\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Pending HR approval\",\"col\":4}},{\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Approved — download payslip\",\"col\":4}},{\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"All my requests\",\"col\":4}}]",
+ "creation": "2026-09-24 13:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "file",
+ "idx": 0,
+ "is_hidden": 0,
+ "label": "My Payslips",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payslip requests",
+   "link_count": 1,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payslip Request",
+   "link_count": 0,
+   "link_to": "Payslip Request",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-09-24 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Payroll",
+ "name": "My Payslips",
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [
+  {
+   "document_type": "Payslip Request",
+   "label": "Pending HR approval",
+   "quick_list_filter": "{\"status\":[\"=\",\"Pending\"]}"
+  },
+  {
+   "document_type": "Payslip Request",
+   "label": "Approved \u2014 download payslip",
+   "quick_list_filter": "{\"status\":[\"=\",\"Approved\"]}"
+  },
+  {
+   "document_type": "Payslip Request",
+   "label": "All my requests",
+   "quick_list_filter": "{}"
+  }
+ ],
+ "restrict_to_domain": "",
+ "roles": [
+  {
+   "role": "Employee"
+  },
+  {
+   "role": "DAF"
+  },
+  {
+   "role": "MD"
+  }
+ ],
+ "sequence_id": 5.0,
+ "shortcuts": [
+  {
+   "color": "Green",
+   "doc_view": "New",
+   "label": "New Payslip Request",
+   "link_to": "Payslip Request",
+   "type": "DocType"
+  },
+  {
+   "color": "Blue",
+   "doc_view": "List",
+   "label": "My Payslip Requests",
+   "link_to": "Payslip Request",
+   "type": "DocType"
+  }
+ ],
+ "title": "My Payslips"
+}

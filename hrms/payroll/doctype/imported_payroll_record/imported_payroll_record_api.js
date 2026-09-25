@@ -3,6 +3,14 @@
 
 frappe.provide("hrms.imported_payroll_record");
 
+hrms.imported_payroll_record.open_payslip_download = function (params) {
+	const qs = new URLSearchParams(params);
+	const url = frappe.urllib.get_full_url(
+		`/api/method/hrms.payroll.doctype.imported_payroll_record.imported_payroll_record.download_payslip_docx?${qs}`
+	);
+	window.location.href = url;
+};
+
 hrms.imported_payroll_record.download_payslip_dialog = function (defaults = {}) {
 	frappe.prompt(
 		[
@@ -63,10 +71,7 @@ hrms.imported_payroll_record.download_payslip_dialog = function (defaults = {}) 
 				params.set("from_month", values.from_month);
 				params.set("to_month", values.to_month);
 			}
-			window.open(
-				`/api/method/hrms.payroll.doctype.imported_payroll_record.imported_payroll_record.download_payslip_docx?${params}`,
-				"_blank"
-			);
+			hrms.imported_payroll_record.open_payslip_download(Object.fromEntries(params));
 		},
 		__("Download Payslip"),
 		__("Download")

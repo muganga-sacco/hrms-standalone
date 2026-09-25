@@ -1,11 +1,6 @@
 {
- "charts": [
-  {
-   "chart_name": "Outgoing Salary",
-   "label": "Outgoing Salary"
-  }
- ],
- "content": "[{\"type\":\"onboarding\",\"data\":{\"onboarding_name\":\"Payroll\",\"col\":12}},{\"type\":\"chart\",\"data\":{\"chart_name\":\"Outgoing Salary\",\"col\":12}},{\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\",\"col\":12}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Dashboard\",\"col\":3}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Salary Register\",\"col\":3}},{\"type\":\"spacer\",\"data\":{\"col\":12}},{\"type\":\"card\",\"data\":{\"card_name\":\"Quick Links\",\"col\":4}},{\"type\":\"card\",\"data\":{\"card_name\":\"Settings\",\"col\":4}}]",
+ "charts": [],
+ "content": "[{\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Shortcuts</b></span>\",\"col\":12}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Staff Payroll Dashboard\",\"col\":3}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payslip Request\",\"col\":3}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payroll Excel Upload\",\"col\":3}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Imported Payroll Register\",\"col\":3}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Salary Payout\",\"col\":3}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Tax & Benefits\",\"col\":3}},{\"type\":\"spacer\",\"data\":{\"col\":12}},{\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Imported payroll &amp; payslips</b></span>\",\"col\":12}},{\"type\":\"card\",\"data\":{\"card_name\":\"Imported Payroll\",\"col\":4}},{\"type\":\"card\",\"data\":{\"card_name\":\"Payslip workflow\",\"col\":4}},{\"type\":\"card\",\"data\":{\"card_name\":\"Standard payroll\",\"col\":4}},{\"type\":\"card\",\"data\":{\"card_name\":\"Settings\",\"col\":4}}]",
  "creation": "2020-05-27 19:54:23.405607",
  "docstatus": 0,
  "doctype": "Workspace",
@@ -18,46 +13,18 @@
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Settings",
-   "link_count": 1,
+   "label": "Imported Payroll",
+   "link_count": 4,
    "onboard": 0,
    "type": "Card Break"
   },
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Payroll Settings",
+   "label": "Staff Payroll Dashboard",
    "link_count": 0,
-   "link_to": "Payroll Settings",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Quick Links",
-   "link_count": 6,
-   "onboard": 0,
-   "type": "Card Break"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Payroll Entry",
-   "link_count": 0,
-   "link_to": "Payroll Entry",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Salary Slip",
-   "link_count": 0,
-   "link_to": "Salary Slip",
-   "link_type": "DocType",
+   "link_to": "staff-payroll-dashboard",
+   "link_type": "Page",
    "onboard": 0,
    "type": "Link"
   },
@@ -94,15 +61,79 @@
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Staff Payroll Dashboard",
+   "label": "Payslip workflow",
+   "link_count": 1,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payslip Request",
    "link_count": 0,
-   "link_to": "staff-payroll-dashboard",
-   "link_type": "Page",
+   "link_to": "Payslip Request",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Standard payroll",
+   "link_count": 3,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Salary Payout",
+   "link_count": 0,
+   "link_to": "Salary Payout",
+   "link_type": "Workspace",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Tax & Benefits",
+   "link_count": 0,
+   "link_to": "Tax & Benefits",
+   "link_type": "Workspace",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Salary Slip",
+   "link_count": 0,
+   "link_to": "Salary Slip",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Settings",
+   "link_count": 1,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payroll Settings",
+   "link_count": 0,
+   "link_to": "Payroll Settings",
+   "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
   }
  ],
- "modified": "2022-09-16 12:11:30.520597",
+ "modified": "2026-09-24 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Payroll",
@@ -111,20 +142,65 @@
  "public": 1,
  "quick_lists": [],
  "restrict_to_domain": "",
- "roles": [],
+ "roles": [
+  {
+   "role": "HR Manager"
+  },
+  {
+   "role": "HR User"
+  },
+  {
+   "role": "DAF"
+  },
+  {
+   "role": "MD"
+  }
+ ],
  "sequence_id": 15.0,
  "shortcuts": [
   {
-   "label": "Dashboard",
-   "link_to": "Payroll",
-   "type": "Dashboard"
+   "color": "Blue",
+   "doc_view": "List",
+   "label": "Staff Payroll Dashboard",
+   "link_to": "staff-payroll-dashboard",
+   "type": "Page"
+  },
+  {
+   "color": "Orange",
+   "doc_view": "List",
+   "format": "{} Pending",
+   "label": "Payslip Request",
+   "link_to": "Payslip Request",
+   "stats_filter": "{\"status\":[\"=\",\"Pending\"]}",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "List",
+   "label": "Payroll Excel Upload",
+   "link_to": "Payroll Excel Upload",
+   "type": "DocType"
   },
   {
    "color": "Grey",
    "doc_view": "List",
-   "label": "Salary Register",
-   "link_to": "Salary Register",
+   "label": "Imported Payroll Register",
+   "link_to": "Imported Payroll Register",
    "type": "Report"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Salary Payout",
+   "link_to": "Salary Payout",
+   "type": "Workspace"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Tax & Benefits",
+   "link_to": "Tax & Benefits",
+   "type": "Workspace"
   }
  ],
  "title": "Payroll"

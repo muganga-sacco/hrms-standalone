@@ -1,6 +1,6 @@
 {
  "actions": [],
- "autoname": "format:IPR-{employee_id_number}-{payroll_month}",
+ "autoname": "format:IPR-{employee_id_number}-{payroll_month}-{payroll_sheet_type}",
  "creation": "2026-09-22 12:00:00.000000",
  "doctype": "DocType",
  "document_type": "Other",
@@ -17,6 +17,7 @@
   "payroll_excel_upload",
   "payroll_period_label",
   "payroll_month",
+  "payroll_sheet_type",
   "payment_date",
   "company",
   "currency",
@@ -111,6 +112,16 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Pay Period",
+   "reqd": 1
+  },
+  {
+   "default": "Staff Payroll",
+   "fieldname": "payroll_sheet_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Payroll Sheet Type",
+   "options": "Staff Payroll\nLumpsum",
    "reqd": 1
   },
   {
@@ -342,19 +353,7 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "System Manager",
-   "share": 1,
-   "submit": 1,
-   "write": 1
-  },
-  {
+   "cancel": 1,
    "create": 1,
    "delete": 1,
    "email": 1,
@@ -368,6 +367,7 @@
    "write": 1
   },
   {
+   "cancel": 1,
    "create": 1,
    "delete": 1,
    "email": 1,
@@ -379,6 +379,20 @@
    "share": 1,
    "submit": 1,
    "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "DAF"
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "MD"
   }
  ],
  "show_name_in_global_search": 1,
