@@ -1,38 +1,6 @@
 // Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
 // License: GNU General Public License v3. See license.txt
-
-const PAYROLL_EXCEL_ALLOWED_TYPES = [
-	".xlsx",
-	".xls",
-	".csv",
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-	"application/vnd.ms-excel",
-	"text/csv",
-];
-
-function patch_payroll_file_attach_control() {
-	const Cls = frappe.ui.form.ControlAttach;
-	if (!Cls || Cls.prototype._payroll_excel_upload_patched) {
-		return;
-	}
-	Cls.prototype._payroll_excel_upload_patched = true;
-	const orig_on_attach_click = Cls.prototype.on_attach_click;
-	Cls.prototype.on_attach_click = function () {
-		if (
-			this.frm?.doctype === "Payroll Excel Upload" &&
-			this.df?.fieldname === "payroll_file"
-		) {
-			this.set_upload_options();
-			this.upload_options.restrictions = this.upload_options.restrictions || {};
-			this.upload_options.restrictions.allowed_file_types = PAYROLL_EXCEL_ALLOWED_TYPES;
-			this.file_uploader = new frappe.ui.FileUploader(this.upload_options);
-			return;
-		}
-		return orig_on_attach_click.apply(this, arguments);
-	};
-}
-
-patch_payroll_file_attach_control();
+// FileUploader patch lives in hrms/public/js/payroll_excel_file_uploader.js (hrms.bundle.js).
 
 function open_payroll_excel_uploader(frm) {
 	new frappe.ui.FileUploader({
@@ -40,7 +8,6 @@ function open_payroll_excel_uploader(frm) {
 		docname: frm.docname,
 		fieldname: "payroll_file",
 		frm,
-		restrictions: { allowed_file_types: PAYROLL_EXCEL_ALLOWED_TYPES },
 		on_success(file) {
 			frm.set_value("payroll_file", file.file_url);
 		},
@@ -48,12 +15,7 @@ function open_payroll_excel_uploader(frm) {
 }
 
 frappe.ui.form.on("Payroll Excel Upload", {
-	onload() {
-		patch_payroll_file_attach_control();
-	},
 	refresh(frm) {
-		patch_payroll_file_attach_control();
-
 		if (frm.doc.docstatus !== 0 && !frm.is_new()) {
 			return;
 		}
