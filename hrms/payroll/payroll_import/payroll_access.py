@@ -8,7 +8,7 @@ from frappe import _
 
 HR_PAYROLL_ROLES = frozenset({"HR Manager", "HR User"})
 PAYROLL_DASHBOARD_VIEW_ROLES = frozenset({"DAF", "MD"})
-PAYSLIP_SELF_REQUEST_ROLES = frozenset({"Employee", "DAF", "MD"})
+# Payslip self-service is not limited to Employee / Requester — any logged-in user (see user_can_request_own_payslip).
 
 
 def user_has_hr_payroll_access(user: str | None = None) -> bool:
@@ -50,7 +50,6 @@ def get_logged_in_employee() -> str | None:
 
 
 def user_can_request_own_payslip(user: str | None = None) -> bool:
+	"""True for any logged-in user regardless of role name (Employee, Requester, custom HR roles, etc.)."""
 	user = user or frappe.session.user
-	if user == "Guest":
-		return False
-	return bool(PAYSLIP_SELF_REQUEST_ROLES & set(frappe.get_roles(user)))
+	return bool(user and user != "Guest")

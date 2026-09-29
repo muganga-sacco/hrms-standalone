@@ -14,8 +14,17 @@ import frappe
 PAYROLL_DASHBOARD_ROLES = ("HR Manager", "HR User", "DAF", "MD")
 HR_PAYROLL_ROLES = ("HR Manager", "HR User")
 VIEW_ONLY_ROLES = frozenset({"DAF", "MD"})
-PAYSLIP_EMPLOYEE_ROLES = ("Employee",)
-EMPLOYEE_MY_PAYSLIPS_DOCTYPES = ("Payslip Request", "Workspace", "Page", "Employee")
+PAYSLIP_REQUEST_ALL_FLAGS = {
+	"read": 1,
+	"create": 1,
+	"write": 1,
+	"print": 1,
+	"email": 1,
+	"export": 1,
+	"report": 1,
+	"share": 1,
+}
+PAYSLIP_SELF_SERVICE_DOCTYPES = ("Workspace", "Page", "Employee")
 VIEWER_IMPORTED_PAYROLL_FLAGS = {
 	"read": 1,
 	"export": 1,
@@ -140,6 +149,36 @@ def _ensure_workspace_role(workspace: str, role: str) -> bool:
 	return True
 
 
+def _payslip_self_service_roles() -> list[str]:
+	"""Every enabled Role except Guest — no whitelist (Requester, *Employee*, etc. all included)."""
+	return frappe.get_all(
+		"Role",
+		filters={"disabled": 0, "name": ["not in", ["Guest"]]},
+		pluck="name",
+		order_by="name",
+	)
+
+
+def _ensure_payslip_self_service_for_all_roles() -> dict[str, list[str]]:
+	"""Grant Payslip Request + My Payslips workspace to every role on the site."""
+	payslip_roles: list[str] = []
+	workspace_roles: list[str] = []
+	employee_read_roles: list[str] = []
+	for role in _payslip_self_service_roles():
+		if _ensure_custom_docperm_flags("Payslip Request", role, PAYSLIP_REQUEST_ALL_FLAGS):
+			payslip_roles.append(role)
+		for doctype in PAYSLIP_SELF_SERVICE_DOCTYPES:
+			if _ensure_doctype_read(doctype, role):
+				employee_read_roles.append(f"{doctype}:{role}")
+		if _ensure_workspace_role("My Payslips", role):
+			workspace_roles.append(role)
+	return {
+		"payslip_request_custom_docperm_added": payslip_roles,
+		"self_service_doctype_read_added": employee_read_roles,
+		"my_payslips_workspace_roles_added": workspace_roles,
+	}
+
+
 def _ensure_page_role(page: str, role: str) -> bool:
 	if frappe.db.exists("Has Role", {"parent": page, "parenttype": "Page", "role": role}):
 		return False
@@ -178,12 +217,7 @@ def ensure_payroll_dashboard_permissions() -> dict:
 		if _ensure_custom_docperm_flags("Imported Payroll Record", role, VIEWER_IMPORTED_PAYROLL_FLAGS):
 			doctype_read.setdefault("Imported Payroll Record", []).append(role)
 
-	for role in PAYSLIP_EMPLOYEE_ROLES:
-		for doctype in EMPLOYEE_MY_PAYSLIPS_DOCTYPES:
-			if _ensure_doctype_read(doctype, role):
-				doctype_read.setdefault(doctype, []).append(role)
-		if _ensure_workspace_role("My Payslips", role):
-			page_roles.append(f"My Payslips:{role}")
+	payslip_self_service = _ensure_payslip_self_service_for_all_roles()
 
 	for doctype in doctype_read:
 		frappe.clear_cache(doctype=doctype)
@@ -195,4 +229,5 @@ def ensure_payroll_dashboard_permissions() -> dict:
 		"hr_import_perms_updated": hr_import,
 		"report_roles_added": report_roles,
 		"page_roles_added": page_roles,
+		"payslip_self_service": payslip_self_service,
 	}

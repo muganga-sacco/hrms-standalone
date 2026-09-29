@@ -8,7 +8,7 @@ import frappe
 from hrms.payroll.payroll_import.payroll_access import (
 	HR_PAYROLL_ROLES,
 	PAYROLL_DASHBOARD_VIEW_ROLES,
-	PAYSLIP_SELF_REQUEST_ROLES,
+	user_can_request_own_payslip,
 )
 
 
@@ -17,9 +17,9 @@ def extend_bootinfo(bootinfo) -> None:
 	if frappe.session.user in ("Guest", "Administrator"):
 		return
 
-	roles = set(frappe.get_roles())
-	if not roles & PAYSLIP_SELF_REQUEST_ROLES:
+	if not user_can_request_own_payslip():
 		return
+	roles = set(frappe.get_roles())
 	if roles & (HR_PAYROLL_ROLES | PAYROLL_DASHBOARD_VIEW_ROLES | {"System Manager"}):
 		return
 

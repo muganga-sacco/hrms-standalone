@@ -57,6 +57,9 @@
  "restrict_to_domain": "",
  "roles": [
   {
+   "role": "All"
+  },
+  {
    "role": "Employee"
   },
   {
