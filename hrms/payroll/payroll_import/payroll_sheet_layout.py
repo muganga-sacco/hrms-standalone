@@ -269,6 +269,16 @@ def _logo_setup_hint(company: str | None) -> str:
 	).format(company or "Company")
 
 
+def _normalize_image_extension(ext: str) -> str:
+	"""Map openpyxl image formats to extensions allowed by System Settings (e.g. JPG not JPEG)."""
+	ext = (ext or ".png").lower().strip()
+	if not ext.startswith("."):
+		ext = f".{ext}"
+	if ext in (".jpeg", ".jpe"):
+		return ".jpg"
+	return ext
+
+
 def extract_first_image_from_workbook(file_path: str) -> tuple[bytes, str] | None:
 	if not file_path or not os.path.exists(file_path):
 		return None
@@ -293,6 +303,7 @@ def extract_first_image_from_workbook(file_path: str) -> tuple[bytes, str] | Non
 			ext = f".{str(image.format).lower()}"
 			if not ext.startswith("."):
 				ext = f".{ext}"
+		ext = _normalize_image_extension(ext)
 		return data, ext
 	except Exception:
 		frappe.log_error(title="Extract payroll Excel logo")
@@ -310,13 +321,17 @@ def save_payroll_sheet_logo_from_excel(file_path: str, payroll_excel_upload: str
 	from frappe.utils.file_manager import save_file
 
 	filename = f"payroll-sheet-logo-{frappe.scrub(payroll_excel_upload)}{ext}"
-	file_doc = save_file(
-		filename,
-		data,
-		"Payroll Excel Upload",
-		payroll_excel_upload,
-		is_private=0,
-	)
+	try:
+		file_doc = save_file(
+			filename,
+			data,
+			"Payroll Excel Upload",
+			payroll_excel_upload,
+			is_private=0,
+		)
+	except Exception:
+		frappe.log_error(title="Save payroll sheet logo from Excel")
+		return None
 	frappe.db.set_value(
 		"Payroll Excel Upload",
 		payroll_excel_upload,
@@ -429,6 +444,10 @@ def sync_company_logo_from_payroll_excel(file_path: str, company: str | None) ->
 	from frappe.utils.file_manager import save_file
 
 	filename = f"payroll-logo-{frappe.scrub(company)}{ext}"
-	file_doc = save_file(filename, data, "Company", company, is_private=0)
+	try:
+		file_doc = save_file(filename, data, "Company", company, is_private=0)
+	except Exception:
+		frappe.log_error(title="Save company logo from payroll Excel")
+		return False
 	frappe.db.set_value("Company", company, "company_logo", file_doc.file_url, update_modified=True)
 	return True

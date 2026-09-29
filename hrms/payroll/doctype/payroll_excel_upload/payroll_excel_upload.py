@@ -93,9 +93,17 @@ def import_payroll_excel(docname: str):
 	period_banner = doc.payroll_period_label
 	upload_footer = doc.payroll_sheet_footer
 
-	save_payroll_sheet_logo_from_excel(file_path, doc.name)
+	try:
+		save_payroll_sheet_logo_from_excel(file_path, doc.name)
+	except Exception:
+		log_lines.append(_("Note: Sheet logo from Excel was not saved (see Error Log)."))
+		frappe.log_error(title="Payroll import sheet logo")
 	if doc.company:
-		sync_company_logo_from_payroll_excel(file_path, doc.company)
+		try:
+			sync_company_logo_from_payroll_excel(file_path, doc.company)
+		except Exception:
+			log_lines.append(_("Note: Company logo from Excel was not saved (see Error Log)."))
+			frappe.log_error(title="Payroll import company logo")
 	doc.reload()
 	doc.payroll_sheet_type = upload_sheet_type
 	doc.payroll_month = upload_month
