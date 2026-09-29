@@ -122,15 +122,32 @@ class PayslipRequest(Document):
 
 
 
+def _is_payslip_request_owner(doc, user: str) -> bool:
+
+	return bool(doc and getattr(doc, "owner", None) == user)
+
+
 def _own_payslip_rules(doc, ptype: str, user: str, employee: str | None) -> bool:
-
-	if not employee:
-
-		return ptype == "create"
 
 	if not doc:
 
 		return ptype in ("create", "read")
+
+	if _is_payslip_request_owner(doc, user):
+
+		if ptype in ("export", "delete"):
+
+			return False
+
+		if ptype == "write" and doc.status not in ("Draft", "Pending"):
+
+			return False
+
+		return ptype in ("create", "read", "write", "print")
+
+	if not employee:
+
+		return ptype == "create"
 
 	if doc.employee != employee:
 
@@ -162,11 +179,21 @@ def get_permission_query_conditions(user: str) -> str:
 
 	employee = frappe.db.get_value("Employee", {"user_id": user}, "name")
 
+	escaped_user = frappe.db.escape(user)
+
 	if not employee:
 
-		return "1=0"
+		return f"`tabPayslip Request`.owner = {escaped_user}"
 
-	return f"`tabPayslip Request`.employee = {frappe.db.escape(employee)}"
+	escaped_employee = frappe.db.escape(employee)
+
+	return (
+
+		f"(`tabPayslip Request`.employee = {escaped_employee} "
+
+		f"OR `tabPayslip Request`.owner = {escaped_user})"
+
+	)
 
 
 
@@ -247,6 +274,10 @@ def _get_request_doc(docname: str) -> Document:
 def _user_may_act_on_own_request(doc: Document) -> bool:
 
 	if user_has_hr_payroll_access():
+
+		return True
+
+	if _is_payslip_request_owner(doc, frappe.session.user):
 
 		return True
 
