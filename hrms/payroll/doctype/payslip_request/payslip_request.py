@@ -42,13 +42,29 @@ class PayslipRequest(Document):
 
 		self._validate_period_fields()
 
-		if self.employee and not self.employee_id_number:
+		if self.employee:
 
-			self.employee_id_number = frappe.db.get_value(
+			resolved = resolve_employee_id_number_for_request(self)
 
-				"Employee", self.employee, "employee_number"
+			if resolved:
 
-			)
+				self.employee_id_number = resolved
+
+				if not (frappe.db.get_value("Employee", self.employee, "employee_number") or "").strip():
+
+					frappe.db.set_value(
+
+						"Employee",
+
+						self.employee,
+
+						"employee_number",
+
+						resolved,
+
+						update_modified=False,
+
+					)
 
 
 
@@ -242,6 +258,86 @@ def _user_may_act_on_own_request(doc: Document) -> bool:
 
 
 
+def resolve_employee_id_number_for_request(doc) -> str:
+
+	"""Payroll ID from import (employee_id_number). Not the Frappe Employee link (HR-EMP-…)."""
+
+	from hrms.payroll.payroll_import.payroll_month_utils import normalize_employee_id_number
+
+	employee = doc.employee if getattr(doc, "employee", None) else None
+
+	payroll_id_sources: list[str | None] = [getattr(doc, "employee_id_number", None)]
+
+	if employee:
+
+		payroll_id_sources.append(frappe.db.get_value("Employee", employee, "employee_number"))
+
+		payroll_id_sources.append(
+
+			frappe.db.get_value(
+
+				"Imported Payroll Record",
+
+				{"employee": employee, "docstatus": 1},
+
+				"employee_id_number",
+
+				order_by="payroll_month desc",
+
+			)
+
+		)
+
+	for raw in payroll_id_sources:
+
+		normalized = normalize_employee_id_number(raw)
+
+		if normalized:
+
+			return normalized
+
+	# Employee link is set (HR-EMP-…) but payroll ID fields empty — still resolve payslip via Employee doc name.
+
+	if employee:
+
+		normalized = normalize_employee_id_number(employee)
+
+		if normalized:
+
+			return normalized
+
+	if employee:
+
+		emp_name = (frappe.db.get_value("Employee", employee, "employee_name") or "").strip()
+
+		if emp_name:
+
+			ids = frappe.get_all(
+
+				"Imported Payroll Record",
+
+				filters={"employee_name": emp_name, "docstatus": 1},
+
+				pluck="employee_id_number",
+
+				limit=2,
+
+			)
+
+			unique = {normalize_employee_id_number(i) for i in ids if i}
+
+			unique.discard("")
+
+			if len(unique) == 1:
+
+				return unique.pop()
+
+	return ""
+
+
+
+
+
 @frappe.whitelist()
 
 def submit_payslip_request(docname: str):
@@ -288,6 +384,12 @@ def approve_payslip_request(docname: str):
 
 	doc.rejection_reason = None
 
+	resolved_id = resolve_employee_id_number_for_request(doc)
+
+	if resolved_id:
+
+		doc.employee_id_number = resolved_id
+
 	doc.save(ignore_permissions=True)
 
 	frappe.db.commit()
@@ -330,19 +432,33 @@ def reject_payslip_request(docname: str, rejection_reason: str | None = None):
 
 def build_download_params_from_request(doc: Document) -> dict:
 
-	from hrms.payroll.payroll_import.payroll_month_utils import normalize_employee_id_number
+	if not doc.employee:
 
-	employee_id = normalize_employee_id_number(doc.employee_id_number)
+		frappe.throw(_("Payslip Request {0} has no Employee linked.").format(doc.name))
 
-	if not employee_id and doc.employee:
+	employee_id = resolve_employee_id_number_for_request(doc)
 
-		employee_id = normalize_employee_id_number(
-			frappe.db.get_value("Employee", doc.employee, "employee_number")
-		)
+	# Request/approve only need the Employee link; download must not fail if Payroll ID field was never stored.
 
 	if not employee_id:
 
-		frappe.throw(_("Employee ID number is missing on this request."))
+		employee_id = doc.employee
+
+	if employee_id != (doc.employee_id_number or "").strip():
+
+		frappe.db.set_value(
+
+			"Payslip Request",
+
+			doc.name,
+
+			"employee_id_number",
+
+			employee_id,
+
+			update_modified=False,
+
+		)
 
 
 

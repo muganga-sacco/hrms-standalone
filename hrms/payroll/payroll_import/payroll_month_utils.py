@@ -17,7 +17,11 @@ def normalize_payroll_month(value) -> date | None:
 
 
 def normalize_employee_id_number(value: str | None) -> str:
-	"""Normalize desk / URL input to match Imported Payroll Record IDs (e.g. MSID 003)."""
+	"""Normalize desk / URL input to match Imported Payroll Record employee_id_number.
+
+	Any non-empty ID is kept as-is after trim/collapse spaces. MSID-prefixed numeric IDs
+	(e.g. MSID003 vs MSID 003) are spaced consistently so lookups match import data.
+	"""
 	text = (value or "").strip().replace("+", " ")
 	text = re.sub(r"\s+", " ", text)
 	if not text:

@@ -42,10 +42,11 @@
    "read_only": 1
   },
   {
+   "description": "Same as ID Number on imported payroll / Employee Number on the Employee master. Any format your Excel uses — not the HR-EMP- code in the Employee link.",
    "fetch_from": "employee.employee_number",
    "fieldname": "employee_id_number",
    "fieldtype": "Data",
-   "label": "Employee ID Number",
+   "label": "Payroll ID Number",
    "read_only": 1
   },
   {
