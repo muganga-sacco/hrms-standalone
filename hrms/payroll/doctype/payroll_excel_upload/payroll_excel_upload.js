@@ -1,7 +1,29 @@
 // Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
 // License: GNU General Public License v3. See license.txt
 
+const PAYROLL_EXCEL_ALLOWED_TYPES = [
+	".xlsx",
+	".xls",
+	".csv",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	"application/vnd.ms-excel",
+	"text/csv",
+];
+
 frappe.ui.form.on("Payroll Excel Upload", {
+	setup(frm) {
+		const attach = frm.fields_dict.payroll_file;
+		if (!attach || attach._payroll_excel_upload_types_patched) {
+			return;
+		}
+		attach._payroll_excel_upload_types_patched = true;
+		attach.on_attach_click = function () {
+			this.set_upload_options();
+			this.upload_options.restrictions = this.upload_options.restrictions || {};
+			this.upload_options.restrictions.allowed_file_types = PAYROLL_EXCEL_ALLOWED_TYPES;
+			this.file_uploader = new frappe.ui.FileUploader(this.upload_options);
+		};
+	},
 	refresh(frm) {
 		if (frm.doc.docstatus !== 0 && !frm.is_new()) {
 			return;
