@@ -42,6 +42,7 @@ app_include_css = "hrms.bundle.css"
 doctype_js = {
 	"Imported Payroll Record": "payroll/doctype/imported_payroll_record/imported_payroll_record_api.js",
 	"Payslip Request": "payroll/doctype/payslip_request/payslip_request.js",
+	"Payroll Excel Upload": "payroll/doctype/payroll_excel_upload/payroll_excel_upload.js",
 }
 doctype_list_js = {
 	"Payslip Request": "payroll/doctype/payslip_request/payslip_request_list.js",
