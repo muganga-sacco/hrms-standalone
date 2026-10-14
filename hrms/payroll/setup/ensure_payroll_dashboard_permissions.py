@@ -9,6 +9,8 @@ Run:
 
 from __future__ import annotations
 
+import json
+
 import frappe
 
 PAYROLL_DASHBOARD_ROLES = ("HR Manager", "HR User", "DAF", "MD")
@@ -179,6 +181,102 @@ def _ensure_payslip_self_service_for_all_roles() -> dict[str, list[str]]:
 	}
 
 
+def _ensure_variable_and_my_payroll_pages() -> None:
+	from pathlib import Path
+
+	from frappe.modules.import_file import import_file_by_path
+
+	base = Path(frappe.get_app_path("hrms")) / "payroll" / "page"
+	for folder in ("variable_dashboard", "my_payroll"):
+		path = base / folder / f"{folder}.json"
+		if path.exists():
+			import_file_by_path(str(path), force=True)
+
+	for role in ("HR Manager", "HR User"):
+		_ensure_page_role("variable-dashboard", role)
+	for role in _payslip_self_service_roles():
+		_ensure_page_role("my-payroll", role)
+	_ensure_workspace_page_link("My Payslips", "My Payroll", "my-payroll")
+	_place_variable_dashboard_in_payroll()
+
+
+def _place_variable_dashboard_in_payroll() -> None:
+	"""Show Variable Dashboard under Payroll & payslips, not Settings."""
+	if not frappe.db.exists("Workspace", "Payroll"):
+		return
+	_ensure_workspace_page_link("Payroll", "Variable Dashboard", "variable-dashboard")
+	workspace = frappe.get_doc("Workspace", "Payroll")
+	content = frappe.parse_json(workspace.content) or []
+	changed = False
+	for block in content:
+		if block.get("type") != "header":
+			continue
+		text = (block.get("data") or {}).get("text") or ""
+		if "Imported payroll" in text:
+			block["data"]["text"] = text.replace("Imported payroll &amp; payslips", "Payroll &amp; payslips").replace(
+				"Imported payroll & payslips", "Payroll & payslips"
+			)
+			changed = True
+	if changed:
+		workspace.content = json.dumps(content)
+		workspace.db_update()
+
+	payslip_idx = frappe.db.get_value(
+		"Workspace Link",
+		{"parent": "Payroll", "label": "Payslip workflow", "type": "Card Break"},
+		"idx",
+	)
+	link_name = frappe.db.get_value(
+		"Workspace Link",
+		{"parent": "Payroll", "link_to": "variable-dashboard"},
+		"name",
+	)
+	if not payslip_idx or not link_name:
+		return
+	current_idx = frappe.db.get_value("Workspace Link", link_name, "idx")
+	if current_idx and current_idx < payslip_idx:
+		return
+	frappe.db.sql(
+		"""
+		UPDATE `tabWorkspace Link`
+		SET idx = idx + 1
+		WHERE parent = 'Payroll' AND idx >= %s AND name != %s
+		""",
+		(payslip_idx, link_name),
+	)
+	frappe.db.set_value("Workspace Link", link_name, "idx", payslip_idx, update_modified=False)
+
+
+def _ensure_workspace_page_link(workspace: str, label: str, page: str) -> None:
+	if not frappe.db.exists("Workspace", workspace):
+		return
+	_insert_workspace_child(
+		"Workspace Link",
+		workspace,
+		"links",
+		{"type": "Link", "label": label, "link_type": "Page", "link_to": page, "link_count": 0},
+		page,
+	)
+	_insert_workspace_child(
+		"Workspace Shortcut",
+		workspace,
+		"shortcuts",
+		{"type": "Page", "label": label, "link_to": page},
+		page,
+	)
+
+
+def _insert_workspace_child(doctype: str, workspace: str, parentfield: str, values: dict, page: str) -> None:
+	if frappe.db.exists(doctype, {"parent": workspace, "link_to": page}):
+		return
+	idx = frappe.db.sql(
+		f"SELECT COALESCE(MAX(idx), 0) + 1 FROM `tab{doctype}` WHERE parent=%s",
+		workspace,
+	)[0][0]
+	doc = frappe.get_doc({"doctype": doctype, "parent": workspace, "parenttype": "Workspace", "parentfield": parentfield, "idx": idx, **values})
+	doc.db_insert()
+
+
 def _ensure_page_role(page: str, role: str) -> bool:
 	if frappe.db.exists("Has Role", {"parent": page, "parenttype": "Page", "role": role}):
 		return False
@@ -218,6 +316,7 @@ def ensure_payroll_dashboard_permissions() -> dict:
 			doctype_read.setdefault("Imported Payroll Record", []).append(role)
 
 	payslip_self_service = _ensure_payslip_self_service_for_all_roles()
+	_ensure_variable_and_my_payroll_pages()
 
 	for doctype in doctype_read:
 		frappe.clear_cache(doctype=doctype)

@@ -6,8 +6,13 @@ from frappe import _
 from frappe.model.document import Document
 
 from hrms.payroll.payroll_import.payroll_access import throw_if_not_hr_payroll
+from hrms.payroll.payroll_import.payroll_employee_link import (
+	compact_payroll_id,
+	find_employee_for_payroll_id,
+)
 from hrms.payroll.payroll_import.payroll_excel_parser import parse_payroll_excel
 from hrms.payroll.payroll_import.payroll_month_utils import (
+	normalize_employee_id_number,
 	normalize_payroll_month,
 	payroll_period_label_for_month,
 )
@@ -50,6 +55,10 @@ def import_payroll_excel(docname: str):
 		raise
 
 	detected_type = parsed.get("payroll_sheet_type") or "Staff Payroll"
+	if detected_type == "Variable" and (doc.payroll_sheet_type or "Auto Detect") == "Auto Detect":
+		frappe.throw(
+			_("Bonus and incentive files are imported on the Variable Dashboard, not on this form.")
+		)
 	log_lines: list[str] = []
 	if (doc.payroll_sheet_type or "Auto Detect") == "Auto Detect":
 		doc.payroll_sheet_type = detected_type
@@ -152,7 +161,7 @@ def _staff_payroll_row_for_lumpsum(record, employee_id: str, payroll_month) -> d
 		"payroll_sheet_type": "Staff Payroll",
 		"docstatus": 1,
 	}
-	account = (getattr(record, "account_number", None) or "").strip()
+	account = str(getattr(record, "account_number", None) or "").strip()
 	if account:
 		filters["account_number"] = account
 	else:
@@ -190,16 +199,7 @@ def _backfill_lumpsum_from_staff_payroll(record, employee_id: str, payroll_month
 		record.position = staff.position
 
 
-def _upsert_payroll_record(upload_doc, row: dict) -> int:
-	employee_id = (row.get("employee_id_number") or "").strip()
-	if not employee_id:
-		frappe.throw(_("Missing employee ID"))
-
-	payroll_month = normalize_payroll_month(row.get("payroll_month") or upload_doc.payroll_month)
-	if not payroll_month:
-		frappe.throw(_("Payroll Month is required on the upload or in the Excel title."))
-
-	sheet_type = upload_doc.payroll_sheet_type or "Staff Payroll"
+def _existing_payroll_record(employee_id: str, payroll_month, sheet_type: str) -> str | None:
 	name = frappe.db.exists(
 		"Imported Payroll Record",
 		{
@@ -208,6 +208,39 @@ def _upsert_payroll_record(upload_doc, row: dict) -> int:
 			"payroll_sheet_type": sheet_type,
 		},
 	)
+	if name:
+		return name
+	compact = compact_payroll_id(employee_id)
+	if not compact:
+		return None
+	found = frappe.db.sql(
+		"""
+		SELECT name
+		FROM `tabImported Payroll Record`
+		WHERE payroll_month = %s
+			AND payroll_sheet_type = %s
+			AND docstatus < 2
+			AND REPLACE(LOWER(IFNULL(employee_id_number, '')), ' ', '') = %s
+		ORDER BY modified DESC
+		LIMIT 1
+		""",
+		(payroll_month, sheet_type, compact),
+		pluck=True,
+	)
+	return found[0] if found else None
+
+
+def _upsert_payroll_record(upload_doc, row: dict) -> int:
+	employee_id = normalize_employee_id_number(row.get("employee_id_number"))
+	if not employee_id:
+		frappe.throw(_("Missing employee ID"))
+
+	payroll_month = normalize_payroll_month(row.get("payroll_month") or upload_doc.payroll_month)
+	if not payroll_month:
+		frappe.throw(_("Payroll Month is required on the upload or in the Excel title."))
+
+	sheet_type = upload_doc.payroll_sheet_type or "Staff Payroll"
+	name = _existing_payroll_record(employee_id, payroll_month, sheet_type)
 
 	if name:
 		existing = frappe.get_doc("Imported Payroll Record", name)
@@ -264,9 +297,7 @@ def _upsert_payroll_record(upload_doc, row: dict) -> int:
 		}
 	)
 
-	employee = frappe.db.get_value("Employee", {"employee_number": employee_id}, "name")
-	if not employee:
-		employee = frappe.db.get_value("Employee", {"name": employee_id}, "name")
+	employee = find_employee_for_payroll_id(employee_id)
 	if employee:
 		record.employee = employee
 		record.department = record.department or frappe.db.get_value("Employee", employee, "department")

@@ -12,6 +12,7 @@ from hrms.payroll.payroll_import.payroll_access import (
 	throw_if_not_payroll_dashboard_viewer,
 	user_has_hr_payroll_access,
 )
+from hrms.payroll.payroll_import.payroll_employee_link import find_employee_for_payroll_id
 from hrms.payroll.payroll_import.payroll_month_utils import normalize_payroll_month
 from hrms.payroll.payroll_import.payroll_sheet_layout import (
 	ensure_payroll_sheet_layout,
@@ -81,9 +82,7 @@ def _employee_date_of_joining(record: dict):
 	if not employee:
 		emp_id = (record.get("employee_id_number") or "").strip()
 		if emp_id:
-			employee = frappe.db.get_value("Employee", {"employee_number": emp_id}, "name")
-			if not employee:
-				employee = frappe.db.get_value("Employee", {"name": emp_id}, "name")
+			employee = find_employee_for_payroll_id(emp_id)
 	if not employee:
 		return None
 	return frappe.db.get_value("Employee", employee, "date_of_joining")
@@ -150,9 +149,13 @@ def get_staff_payroll_dashboard(
 	filters: dict = {"docstatus": 1, "payroll_month": month}
 	if company:
 		filters["company"] = company
+	if payroll_sheet_type == "Variable":
+		payroll_sheet_type = "Staff Payroll"
 	effective_sheet_type = payroll_sheet_type if payroll_sheet_type not in ("All", "", None) else "Staff Payroll"
 	if payroll_sheet_type and payroll_sheet_type not in ("All", ""):
 		filters["payroll_sheet_type"] = payroll_sheet_type
+	else:
+		filters["payroll_sheet_type"] = ["in", ["Staff Payroll", "Lumpsum"]]
 
 	records = frappe.get_all(
 		"Imported Payroll Record",

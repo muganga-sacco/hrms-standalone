@@ -16,13 +16,25 @@ def normalize_payroll_month(value) -> date | None:
 	return getdate(get_first_day(getdate(value)))
 
 
-def normalize_employee_id_number(value: str | None) -> str:
+def _excel_id_text(value) -> str:
+	"""Excel ID cells are often numbers (80) rather than text."""
+	if value is None or isinstance(value, bool):
+		return ""
+	if isinstance(value, int):
+		return str(value)
+	if isinstance(value, float):
+		return str(int(value)) if value.is_integer() else str(value)
+	return str(value)
+
+
+def normalize_employee_id_number(value: str | int | float | None) -> str:
 	"""Normalize desk / URL input to match Imported Payroll Record employee_id_number.
 
 	Any non-empty ID is kept as-is after trim/collapse spaces. MSID-prefixed numeric IDs
 	(e.g. MSID003 vs MSID 003) are spaced consistently so lookups match import data.
+	Numeric Excel cells (for example ID 80) are kept as text.
 	"""
-	text = (value or "").strip().replace("+", " ")
+	text = _excel_id_text(value).strip().replace("+", " ")
 	text = re.sub(r"\s+", " ", text)
 	if not text:
 		return ""

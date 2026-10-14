@@ -83,6 +83,11 @@ frappe.ui.form.on("Payroll Excel Upload", {
 	},
 	refresh(frm) {
 		patch_payroll_file_attach_button(frm);
+		const sheet_options = ["Auto Detect", "Staff Payroll", "Lumpsum"];
+		if (frm.doc.payroll_sheet_type === "Variable") {
+			sheet_options.push("Variable");
+		}
+		frm.set_df_property("payroll_sheet_type", "options", sheet_options.join("\n"));
 
 		if (frm.doc.docstatus !== 0 && !frm.is_new()) {
 			return;

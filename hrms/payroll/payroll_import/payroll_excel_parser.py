@@ -128,17 +128,23 @@ def parse_sheet_footer_from_rows(rows: list[tuple]) -> dict | None:
 
 
 def detect_payroll_sheet_type(rows: list[tuple]) -> str:
-	for row in rows:
+	for row in rows[:30]:
 		if not row:
 			continue
 		for cell in row:
-			if isinstance(cell, str) and "LUMPSUM" in cell.upper():
+			if not isinstance(cell, str):
+				continue
+			upper = cell.upper()
+			if any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE PAY")):
+				return "Variable"
+			if "LUMPSUM" in upper:
 				return "Lumpsum"
 	return "Staff Payroll"
 
 
 def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, list[tuple], int]:
 	title = None
+	fallback_title = None
 	header_idx = None
 	for idx, row in enumerate(rows):
 		if not row:
@@ -146,12 +152,19 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 		for cell in row:
 			if isinstance(cell, str):
 				upper = cell.upper()
+				candidate = cell.strip()
 				if "STAFF PAYROLL" in upper:
-					title = cell.strip()
-				elif "LUMPSUM" in upper and "GROSS" not in upper:
-					candidate = cell.strip()
+					title = candidate
+				elif any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE PAY")):
 					if candidate and (not title or len(candidate) > len(title)):
 						title = candidate
+				elif "LUMPSUM" in upper and "GROSS" not in upper:
+					if candidate and (not title or len(candidate) > len(title)):
+						title = candidate
+				elif _looks_like_sheet_title(candidate) and (
+					not fallback_title or len(candidate) > len(fallback_title)
+				):
+					fallback_title = candidate
 		first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
 		if first_cell in ("S/N", "S/N ", "SN", "NAMES", "NAME", "#"):
 			header_idx = idx
@@ -177,7 +190,21 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 			continue
 		break
 
+	if not title:
+		title = fallback_title
 	return title, header_idx, sub_header_rows, data_start
+
+
+def _looks_like_sheet_title(text: str) -> bool:
+	"""A banner above the header, including bonus types that are not named in advance."""
+	if not text or len(text) < 12:
+		return False
+	upper = text.upper()
+	if any(token in upper for token in ("GROSS SALARY", "BASIC SALARY", "PAYE", "PENSION", "ID NUMBER")):
+		return False
+	has_year = bool(re.search(r"\b20\d{2}\b", text))
+	has_month = any(month in text.lower() for month in MONTH_MAP)
+	return has_year or has_month
 
 
 def _parse_period_from_rows(rows: list[tuple], header_row_idx: int) -> tuple[str, str | None]:
@@ -277,6 +304,8 @@ def _build_column_map(headers: list[str], sub_header_rows: list[tuple]) -> dict[
 		"paye_pay_as_you_earn": "paye",
 		"net_salary": "net_salary",
 		"net_paid": "net_paid",
+		"net_take_home_salary": "take_home",
+		"net_takehome_salary": "take_home",
 		"take_home": "take_home",
 		"position": "position",
 		"date_of_joining": "date_of_joining",
@@ -391,6 +420,7 @@ def _apply_fuzzy_field_map(by_key: dict[str, int], field_map: dict[str, int]) ->
 		("oh_employer", lambda k: ("oh" in k and "employer" in k) or k.startswith("oh_")),
 		("maternity_employee", lambda k: "maternity" in k and "employee" in k),
 		("maternity_employer", lambda k: "maternity" in k and "employer" in k),
+		("take_home", lambda k: "take" in k and "home" in k),
 		("net_before_cbhi", lambda k: "net" in k and "before" in k and "cbhi" in k),
 		("cbhi", lambda k: "cbhi" in k and "before" not in k),
 		("basic_salary", lambda k: k == "basic" or ("basic" in k and "salary" in k)),
@@ -505,11 +535,11 @@ def _row_to_record(
 			doj = getdate(doj).isoformat()
 
 	record = {
-		"employee_id_number": _cell(row, column_map, "employee_id_number"),
-		"employee_name": _cell(row, column_map, "employee_name"),
+		"employee_id_number": _excel_text(_cell(row, column_map, "employee_id_number")),
+		"employee_name": _excel_text(_cell(row, column_map, "employee_name")),
 		"date_of_joining": doj,
-		"position": _cell(row, column_map, "position"),
-		"department": _cell(row, column_map, "department"),
+		"position": _excel_text(_cell(row, column_map, "position")),
+		"department": _excel_text(_cell(row, column_map, "department")),
 		"payroll_period_label": payroll_period_label,
 		"payroll_month": payroll_month,
 		"basic_salary": _flt(_cell(row, column_map, "basic_salary")),
@@ -534,15 +564,19 @@ def _row_to_record(
 		"insurance_prime": _flt(_cell(row, column_map, "insurance_prime")),
 		"net_paid": _flt(_cell(row, column_map, "net_paid")),
 		"compulsory_saving": _flt(_cell(row, column_map, "compulsory_saving")),
-		"compulsory_saving_account": _cell(row, column_map, "compulsory_saving_account"),
+		"compulsory_saving_account": _excel_text(_cell(row, column_map, "compulsory_saving_account")),
 		"take_home": _flt(_cell(row, column_map, "take_home")),
-		"account_number": _cell(row, column_map, "account_number"),
-		"bank": _cell(row, column_map, "bank"),
+		"account_number": _excel_text(_cell(row, column_map, "account_number")),
+		"bank": _excel_text(_cell(row, column_map, "bank")),
 	}
 	record["other_deductions"] = _flt(record["muganga_sacco_social_fund"]) + _flt(record["rpf"]) + _flt(
 		record["brd_loan"]
 	) + _flt(record["sport_subscription"]) + _flt(record["insurance_sanlam"]) + _flt(record["insurance_prime"])
 	record["total_deductions"] = _flt(record["gross_salary"]) - _flt(record["net_salary"])
+	if not record["take_home"] and record["net_before_cbhi"]:
+		record["take_home"] = _flt(record["net_before_cbhi"]) - _flt(record["cbhi"])
+	if not record["net_salary"] and record["take_home"]:
+		record["net_salary"] = record["take_home"]
 	if not record["take_home"] and record["net_salary"]:
 		record["take_home"] = record["net_salary"]
 
@@ -568,6 +602,20 @@ def _row_to_record(
 	if not record["employee_id_number"] and not record["employee_name"]:
 		frappe.throw(_("Row is missing employee ID and name."))
 	return record
+
+
+def _excel_text(val) -> str | None:
+	"""Keep ID numbers and account numbers as text when Excel stores them as numbers."""
+	if val is None or val == "":
+		return None
+	if isinstance(val, bool):
+		return str(val)
+	if isinstance(val, int):
+		return str(val)
+	if isinstance(val, float):
+		return str(int(val)) if val.is_integer() else str(val)
+	text = str(val).strip()
+	return text or None
 
 
 def _flt(val):

@@ -46,25 +46,19 @@ class PayslipRequest(Document):
 
 			resolved = resolve_employee_id_number_for_request(self)
 
-			if resolved:
+			if not resolved:
 
-				self.employee_id_number = resolved
+				frappe.throw(
 
-				if not (frappe.db.get_value("Employee", self.employee, "employee_number") or "").strip():
+					_("Set Employee Number on {0}. It must match ID NUMBER on the payroll and lumpsum template.").format(
 
-					frappe.db.set_value(
-
-						"Employee",
-
-						self.employee,
-
-						"employee_number",
-
-						resolved,
-
-						update_modified=False,
+						self.employee_name or self.employee
 
 					)
+
+				)
+
+			self.employee_id_number = resolved
 
 
 
@@ -291,79 +285,21 @@ def _user_may_act_on_own_request(doc: Document) -> bool:
 
 def resolve_employee_id_number_for_request(doc) -> str:
 
-	"""Payroll ID from import (employee_id_number). Not the Frappe Employee link (HR-EMP-…)."""
+	"""Employee Number, the ID NUMBER on the payroll and lumpsum template."""
 
 	from hrms.payroll.payroll_import.payroll_month_utils import normalize_employee_id_number
 
 	employee = doc.employee if getattr(doc, "employee", None) else None
 
-	payroll_id_sources: list[str | None] = [getattr(doc, "employee_id_number", None)]
+	if not employee:
 
-	if employee:
+		return ""
 
-		payroll_id_sources.append(frappe.db.get_value("Employee", employee, "employee_number"))
+	return normalize_employee_id_number(
 
-		payroll_id_sources.append(
+		frappe.db.get_value("Employee", employee, "employee_number")
 
-			frappe.db.get_value(
-
-				"Imported Payroll Record",
-
-				{"employee": employee, "docstatus": 1},
-
-				"employee_id_number",
-
-				order_by="payroll_month desc",
-
-			)
-
-		)
-
-	for raw in payroll_id_sources:
-
-		normalized = normalize_employee_id_number(raw)
-
-		if normalized:
-
-			return normalized
-
-	# Employee link is set (HR-EMP-…) but payroll ID fields empty — still resolve payslip via Employee doc name.
-
-	if employee:
-
-		normalized = normalize_employee_id_number(employee)
-
-		if normalized:
-
-			return normalized
-
-	if employee:
-
-		emp_name = (frappe.db.get_value("Employee", employee, "employee_name") or "").strip()
-
-		if emp_name:
-
-			ids = frappe.get_all(
-
-				"Imported Payroll Record",
-
-				filters={"employee_name": emp_name, "docstatus": 1},
-
-				pluck="employee_id_number",
-
-				limit=2,
-
-			)
-
-			unique = {normalize_employee_id_number(i) for i in ids if i}
-
-			unique.discard("")
-
-			if len(unique) == 1:
-
-				return unique.pop()
-
-	return ""
+	)
 
 
 
@@ -469,11 +405,17 @@ def build_download_params_from_request(doc: Document) -> dict:
 
 	employee_id = resolve_employee_id_number_for_request(doc)
 
-	# Request/approve only need the Employee link; download must not fail if Payroll ID field was never stored.
-
 	if not employee_id:
 
-		employee_id = doc.employee
+		frappe.throw(
+
+			_("Set Employee Number on {0}. It must match ID NUMBER on the payroll and lumpsum template.").format(
+
+				doc.employee_name or doc.employee
+
+			)
+
+		)
 
 	if employee_id != (doc.employee_id_number or "").strip():
 

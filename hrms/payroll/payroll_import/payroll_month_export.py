@@ -409,6 +409,210 @@ def build_lumpsum_month_excel(payroll_month: str, company: str | None = None) ->
 	return buffer.getvalue()
 
 
+VARIABLE_COLUMNS: list[tuple[str, str, bool]] = [
+	("employee_id_number", "ID NUMBER", False),
+	("employee_name", "NAMES", False),
+	("date_of_joining", "Date of Joining", False),
+	("department", "DEPARTMENT", False),
+	("position", "POSITION", False),
+	("basic_salary", "Basic salary", True),
+	("gross_salary", "Gross Salary", True),
+	("paye", "PAYE(PAY AS YOU EARN)", True),
+	("pension_employee", "Pension Employee 6%", True),
+	("pension_employer", "Pension Employer 6%", True),
+	("oh_employer", "OH Employer 2%", True),
+	("maternity_employee", "Employee 0,3%", True),
+	("maternity_employer", "Employer 0,3%", True),
+	("net_before_cbhi", "Net before CBHI", True),
+	("cbhi", "RSSB CBHI Scheme 0.5%", True),
+	("take_home", "Net Take-home Salary", True),
+	("account_number", "Account Number", False),
+	("bank", "Beneficiary Bank", False),
+]
+
+_VARIABLE_RSSB = {
+	"Pension Employee 6%",
+	"Pension Employer 6%",
+	"OH Employer 2%",
+	"Employee 0,3%",
+	"Employer 0,3%",
+}
+
+
+def build_variable_month_excel(
+	payroll_month: str,
+	company: str | None = None,
+	variable_type: str | None = None,
+) -> bytes:
+	"""Excel in the variable-pay template: title, grouped RSSB headers, grand total."""
+	try:
+		from openpyxl import Workbook
+		from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+		from openpyxl.utils import get_column_letter
+	except ImportError:
+		frappe.throw(_("openpyxl is required. Install: pip install openpyxl"))
+
+	month = normalize_payroll_month(payroll_month)
+	if not month:
+		frappe.throw(_("Payroll Month is required."))
+
+	filters: dict = {"docstatus": 1, "payroll_month": month, "payroll_sheet_type": "Variable"}
+	if company:
+		filters["company"] = company
+	if variable_type:
+		filters["payroll_period_label"] = variable_type
+	fields = list({col[0] for col in VARIABLE_COLUMNS})
+	fields.extend(["payroll_period_label", "company", "net_salary", "payroll_excel_upload"])
+	records = frappe.get_all(
+		"Imported Payroll Record",
+		filters=filters,
+		fields=fields,
+		order_by="payroll_period_label asc, employee_name asc",
+		limit_page_length=0,
+	)
+	if not records:
+		frappe.throw(_("No variable pay uploaded for this filter."))
+
+	groups: dict[str, list[dict]] = {}
+	for record in records:
+		label = (record.get("payroll_period_label") or month.strftime("%B %Y")).strip()
+		groups.setdefault(label, []).append(record)
+
+	wb = Workbook()
+	first = True
+	for label, rows in groups.items():
+		title = label.upper()
+		sheet_name = "".join("_" if ch in '[]:*?/\\' else ch for ch in title).strip()[:31] or "VARIABLE"
+		if first:
+			ws = wb.active
+			ws.title = sheet_name
+			first = False
+		else:
+			ws = wb.create_sheet(sheet_name[:31])
+		_write_variable_sheet(ws, rows, title, month, company or rows[0].get("company"))
+
+	buffer = io.BytesIO()
+	wb.save(buffer)
+	buffer.seek(0)
+	return buffer.getvalue()
+
+
+def _write_variable_sheet(ws, records: list[dict], title: str, month, company: str | None) -> None:
+	from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+	from openpyxl.utils import get_column_letter
+	from openpyxl.drawing.image import Image as XLImage
+
+	last_col = 1 + len(VARIABLE_COLUMNS)
+	thin = Side(style="thin", color="000000")
+	border = Border(left=thin, right=thin, top=thin, bottom=thin)
+	header_fill = PatternFill("solid", fgColor="D9D9D9")
+	sub_fill = PatternFill("solid", fgColor="BFBFBF")
+	total_fill = PatternFill("solid", fgColor="FDE9D9")
+	header_font = Font(bold=True, size=9)
+	title_font = Font(bold=True, size=14)
+
+	payroll_excel_upload = records[0].get("payroll_excel_upload") or get_payroll_excel_upload_for_month(
+		company, month, "Variable"
+	)
+	ensure_payroll_sheet_layout(payroll_excel_upload, allow_sync=False)
+	logo_path = get_company_logo_path(company, payroll_excel_upload)
+	if not logo_path and company:
+		logo_path = get_company_logo_path(company, get_payroll_excel_upload_for_month(company, month, "Staff Payroll"))
+	if logo_path:
+		try:
+			img = XLImage(logo_path)
+			img.height = 90
+			img.width = 200
+			ws.add_image(img, "A1")
+			for r in range(1, 7):
+				ws.row_dimensions[r].height = 18
+		except Exception:
+			frappe.log_error(title="Variable Excel Logo")
+
+	title_row, h1, h2, h3, data_start = 7, 8, 9, 10, 11
+	ws.merge_cells(start_row=title_row, start_column=2, end_row=title_row, end_column=last_col)
+	title_cell = ws.cell(row=title_row, column=2, value=title)
+	title_cell.font = title_font
+	title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+	rssb_cols = [
+		idx
+		for idx, (_field, label, _num) in enumerate(VARIABLE_COLUMNS, start=2)
+		if label in _VARIABLE_RSSB
+	]
+	pension_cols = rssb_cols[:3]
+	maternity_cols = rssb_cols[3:]
+
+	def style_header(cell, fill=None):
+		cell.font = header_font
+		cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+		cell.border = border
+		cell.fill = fill or header_fill
+
+	ws.merge_cells(start_row=h1, start_column=1, end_row=h3, end_column=1)
+	style_header(ws.cell(row=h1, column=1, value="S/N"))
+
+	for col, (_field, label, _num) in enumerate(VARIABLE_COLUMNS, start=2):
+		if col in rssb_cols:
+			continue
+		ws.merge_cells(start_row=h1, start_column=col, end_row=h3, end_column=col)
+		style_header(ws.cell(row=h1, column=col, value=label))
+
+	if rssb_cols:
+		ws.merge_cells(start_row=h1, start_column=rssb_cols[0], end_row=h1, end_column=rssb_cols[-1])
+		style_header(ws.cell(row=h1, column=rssb_cols[0], value="RSSB CONTRIBUTIONS"))
+		ws.merge_cells(start_row=h2, start_column=pension_cols[0], end_row=h2, end_column=pension_cols[-1])
+		style_header(ws.cell(row=h2, column=pension_cols[0], value="PENSION SCHEME + OH"), sub_fill)
+		ws.merge_cells(start_row=h2, start_column=maternity_cols[0], end_row=h2, end_column=maternity_cols[-1])
+		style_header(ws.cell(row=h2, column=maternity_cols[0], value="MATERNITY LEAVE BENEFITS"), sub_fill)
+		for col in rssb_cols:
+			label = VARIABLE_COLUMNS[col - 2][1]
+			style_header(ws.cell(row=h3, column=col, value=label), sub_fill)
+
+	ws.row_dimensions[h1].height = 22
+	ws.row_dimensions[h3].height = 30
+
+	totals = {idx: 0.0 for idx, (_f, _l, is_num) in enumerate(VARIABLE_COLUMNS, start=2) if is_num}
+	for sn, record in enumerate(records, start=1):
+		row_num = data_start + sn - 1
+		cell = ws.cell(row=row_num, column=1, value=sn)
+		cell.border = border
+		cell.alignment = Alignment(horizontal="center")
+		take_home = float(record.get("take_home") or 0) or float(record.get("net_salary") or 0)
+		if not take_home and record.get("net_before_cbhi"):
+			take_home = float(record.get("net_before_cbhi") or 0) - float(record.get("cbhi") or 0)
+		for col, (field, _label, is_num) in enumerate(VARIABLE_COLUMNS, start=2):
+			val = take_home if field == "take_home" else record.get(field)
+			if field == "date_of_joining" and val:
+				val = getdate(val).strftime("%d-%m-%Y")
+			elif is_num:
+				val = round(float(val or 0), 2)
+				totals[col] += val
+			cell = ws.cell(row=row_num, column=col, value=val if val not in ("", None) else None)
+			cell.border = border
+		# row_num unused after loop; grand total follows last data row
+	total_row = data_start + len(records)
+	ws.merge_cells(start_row=total_row, start_column=2, end_row=total_row, end_column=6)
+	label_cell = ws.cell(row=total_row, column=2, value="GRAND TOTAL")
+	label_cell.font = Font(bold=True, size=9)
+	label_cell.fill = total_fill
+	label_cell.alignment = Alignment(horizontal="center")
+	for col in range(1, last_col + 1):
+		cell = ws.cell(row=total_row, column=col)
+		cell.border = border
+		cell.fill = total_fill
+		cell.font = Font(bold=True, size=9)
+		if col in totals:
+			cell.value = round(totals[col], 2)
+
+	footer = _export_footer(company, month, payroll_excel_upload, payroll_sheet_type="Variable")
+	_append_sheet_footer(ws, total_row, footer, last_col)
+
+	ws.column_dimensions["A"].width = 6
+	for col in range(2, last_col + 1):
+		ws.column_dimensions[get_column_letter(col)].width = 16
+
+
 def _export_footer(
 	company: str | None,
 	month,

@@ -8,6 +8,7 @@ import os
 import re
 from calendar import monthrange
 from datetime import date
+from urllib.parse import quote
 
 import frappe
 from frappe.utils import get_url, getdate
@@ -36,11 +37,20 @@ def _file_url_to_path(file_url: str | None) -> str | None:
 
 
 def _file_url_to_public_url(file_url: str | None) -> str | None:
+	"""Root-relative URL so the logo loads on the host the desk is using."""
 	if not file_url:
 		return None
-	if file_url.startswith("http"):
-		return file_url
-	return get_url(file_url)
+	path = file_url
+	if path.startswith("http://") or path.startswith("https://"):
+		from urllib.parse import urlsplit
+
+		parsed = urlsplit(path)
+		path = parsed.path or "/"
+		if parsed.query:
+			path = f"{path}?{parsed.query}"
+	if not path.startswith("/"):
+		path = f"/{path}"
+	return "/".join(quote(part) for part in path.split("/"))
 
 
 def _company_attach_fieldnames() -> list[str]:
@@ -106,15 +116,23 @@ def _company_logo_file_url(company: str | None) -> str | None:
 	return _letter_head_logo_file_url(company)
 
 
+def _logo_file_exists(file_url: str | None) -> bool:
+	if not file_url:
+		return False
+	if str(file_url).startswith("/assets/") or str(file_url).startswith("http"):
+		return True
+	return bool(_file_url_to_path(file_url))
+
+
 def resolve_payroll_logo_file_url(
 	company: str | None, payroll_excel_upload: str | None = None
 ) -> str | None:
-	"""Logo order: imported Excel upload → Company logo / letter head → bundled asset."""
+	"""Logo order: imported Excel upload → Company logo / letter head."""
 	upload_logo = _upload_logo_file_url(payroll_excel_upload)
-	if upload_logo:
+	if _logo_file_exists(upload_logo):
 		return upload_logo
 	company_logo = _company_logo_file_url(company)
-	if company_logo:
+	if _logo_file_exists(company_logo):
 		return company_logo
 	return None
 
@@ -310,6 +328,17 @@ def extract_first_image_from_workbook(file_path: str) -> tuple[bytes, str] | Non
 		return None
 
 
+def _write_logo_bytes(file_url: str, data: bytes) -> None:
+	"""Put logo bytes back when a File row exists but the image was removed from disk."""
+	name = os.path.basename(file_url.split("?", 1)[0])
+	if not name or name in (".", ".."):
+		return
+	folder = frappe.get_site_path("public", "files")
+	os.makedirs(folder, exist_ok=True)
+	with open(os.path.join(folder, name), "wb") as handle:
+		handle.write(data)
+
+
 def save_payroll_sheet_logo_from_excel(file_path: str, payroll_excel_upload: str) -> str | None:
 	meta = frappe.get_meta("Payroll Excel Upload")
 	if not meta.has_field("payroll_sheet_logo"):
@@ -318,28 +347,40 @@ def save_payroll_sheet_logo_from_excel(file_path: str, payroll_excel_upload: str
 	if not extracted:
 		return None
 	data, ext = extracted
-	from frappe.utils.file_manager import save_file
+	from frappe.utils.file_manager import get_content_hash, get_file_data_from_hash, save_file
 
-	filename = f"payroll-sheet-logo-{frappe.scrub(payroll_excel_upload)}{ext}"
-	try:
-		file_doc = save_file(
-			filename,
-			data,
-			"Payroll Excel Upload",
-			payroll_excel_upload,
-			is_private=0,
-		)
-	except Exception:
-		frappe.log_error(title="Save payroll sheet logo from Excel")
+	file_url = None
+	existing = get_file_data_from_hash(get_content_hash(data), is_private=0)
+	if existing and existing.get("file_url"):
+		file_url = existing["file_url"]
+		if not _file_url_to_path(file_url):
+			_write_logo_bytes(file_url, data)
+	else:
+		filename = f"payroll-sheet-logo-{frappe.scrub(payroll_excel_upload)}{ext}"
+		try:
+			file_doc = save_file(
+				filename,
+				data,
+				"Payroll Excel Upload",
+				payroll_excel_upload,
+				is_private=0,
+			)
+			file_url = file_doc.file_url
+		except Exception:
+			frappe.log_error(title="Save payroll sheet logo from Excel")
+			return None
+		if file_url and not _file_url_to_path(file_url):
+			_write_logo_bytes(file_url, data)
+	if not file_url:
 		return None
 	frappe.db.set_value(
 		"Payroll Excel Upload",
 		payroll_excel_upload,
 		"payroll_sheet_logo",
-		file_doc.file_url,
+		file_url,
 		update_modified=False,
 	)
-	return file_doc.file_url
+	return file_url
 
 
 def _set_payroll_excel_upload_layout_fields(
@@ -353,7 +394,7 @@ def _set_payroll_excel_upload_layout_fields(
 	if period_label:
 		values["payroll_period_label"] = period_label
 	if footer is not None:
-		values["payroll_sheet_footer"] = footer
+		values["payroll_sheet_footer"] = footer if isinstance(footer, str) else json.dumps(footer)
 	if not values:
 		return
 	frappe.db.set_value(
@@ -388,6 +429,7 @@ def sync_payroll_sheet_layout_from_upload(payroll_excel_upload: str) -> bool:
 		frappe.log_error(title="Refresh payroll sheet layout")
 		return False
 
+	save_payroll_sheet_logo_from_excel(file_path, payroll_excel_upload)
 	sheet_title = (parsed.get("sheet_title") or "").strip()
 	current_label = (row.payroll_period_label or "").strip()
 	period_label = sheet_title if sheet_title and len(sheet_title) > len(current_label) else None
@@ -396,7 +438,6 @@ def sync_payroll_sheet_layout_from_upload(payroll_excel_upload: str) -> bool:
 		_set_payroll_excel_upload_layout_fields(
 			payroll_excel_upload, period_label=period_label, footer=footer
 		)
-	save_payroll_sheet_logo_from_excel(file_path, payroll_excel_upload)
 	if row.company:
 		sync_company_logo_from_payroll_excel(file_path, row.company)
 	frappe.db.commit()

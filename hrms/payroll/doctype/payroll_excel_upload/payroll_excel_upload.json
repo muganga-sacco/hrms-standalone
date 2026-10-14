@@ -35,7 +35,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Payroll Sheet Type",
-   "options": "Auto Detect\nStaff Payroll\nLumpsum"
+   "options": "Auto Detect\nStaff Payroll\nLumpsum\nVariable"
   },
   {
    "fieldname": "payroll_period_label",

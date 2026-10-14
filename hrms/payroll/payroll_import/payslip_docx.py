@@ -129,7 +129,8 @@ PAYSLIP_FIELDS = [
 
 MAX_PAYSLIP_MONTHS = 24
 MAX_PAYSLIP_ROWS_ONE_PAGE = 3
-PAYSLIP_TABLE_COLS = 14
+PAYSLIP_TABLE_COLS = 15
+BONUS_COLUMN_WIDTH = 1600
 
 
 def get_payroll_records_for_payslip(
@@ -185,6 +186,10 @@ def _is_lumpsum_record(record: dict) -> bool:
 	return (record.get("payroll_sheet_type") or "Staff Payroll").strip() == "Lumpsum"
 
 
+def _is_variable_record(record: dict) -> bool:
+	return (record.get("payroll_sheet_type") or "").strip() == "Variable"
+
+
 def _add_employee_id_variant(id_variants: set[str], val) -> None:
 	text = (val or "").strip()
 	if not text or text.upper().startswith("GRAND TOTAL"):
@@ -193,15 +198,20 @@ def _add_employee_id_variant(id_variants: set[str], val) -> None:
 
 
 def _resolve_payslip_employee_scope(employee_id_number: str) -> dict:
+	from hrms.payroll.payroll_import.payroll_employee_link import (
+		find_employee_for_payroll_id,
+		payroll_id_variants,
+	)
+
 	employee_id_number = (employee_id_number or "").strip()
-	employee = frappe.db.get_value("Employee", {"employee_number": employee_id_number}, "name")
-	if not employee:
-		employee = frappe.db.get_value("Employee", {"name": employee_id_number}, "name")
+	employee = find_employee_for_payroll_id(employee_id_number)
 
 	id_variants: set[str] = set()
 	name_keys: set[str] = set()
 	account_numbers: set[str] = set()
 
+	for variant in payroll_id_variants(employee_id_number):
+		_add_employee_id_variant(id_variants, variant)
 	_add_employee_id_variant(id_variants, employee_id_number)
 	if employee:
 		_add_employee_id_variant(
@@ -336,8 +346,11 @@ def _pick_latest_per_month_and_sheet(records: list[dict]) -> dict[str, dict[str,
 		if not month:
 			continue
 		month_key = getdate(month).isoformat()
-		sheet_key = "lumpsum" if _is_lumpsum_record(record) else "staff"
 		month_bucket = by_month.setdefault(month_key, {})
+		if _is_variable_record(record):
+			month_bucket.setdefault("variables", []).append(record)
+			continue
+		sheet_key = "lumpsum" if _is_lumpsum_record(record) else "staff"
 		month_bucket.setdefault(sheet_key, record)
 	return by_month
 
@@ -349,6 +362,8 @@ def _merge_staff_and_lumpsum(staff: dict | None, lumpsum: dict | None, month_key
 		_apply_staff_record_to_merged(merged, staff)
 	if lumpsum:
 		_apply_lumpsum_record_to_merged(merged, lumpsum)
+	merged["gross_variable"] = 0.0
+	merged["variable_labels"] = []
 	merged["gross_salary"] = merged["gross_staff"] + merged["gross_lumpsum"]
 	staff_net = _flt(staff.get("net_salary")) if staff else 0.0
 	lumpsum_net = _flt(lumpsum.get("net_salary")) if lumpsum else 0.0
@@ -385,6 +400,53 @@ def _apply_staff_record_to_merged(target: dict, record: dict) -> None:
 	):
 		if record.get(field):
 			target[field] = record.get(field)
+
+
+def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> None:
+	"""Add bonuses and incentives the employee received in this month."""
+	if not variables:
+		target.setdefault("gross_variable", 0.0)
+		target.setdefault("bonus_incentives", 0.0)
+		target.setdefault("variable_labels", [])
+		return
+	labels: list[str] = list(target.get("variable_labels") or [])
+	gross_variable = _flt(target.get("gross_variable"))
+	bonus_incentives = _flt(target.get("bonus_incentives"))
+	variable_net = 0.0
+	for record in variables:
+		# Basic salary on the payslip stays the staff figure.
+		# The variable sheet's Basic salary is the bonus column.
+		bonus_incentives += _flt(record.get("basic_salary"))
+		target["ict_allowance"] += _flt(record.get("ict_allowance")) + _flt(record.get("itc_allowance"))
+		gross_variable += _flt(record.get("gross_salary"))
+		variable_net += _flt(record.get("net_salary")) or _flt(record.get("take_home"))
+		target["paye"] += _flt(record.get("paye"))
+		target["pension_employee"] += _flt(record.get("pension_employee"))
+		target["maternity_employee"] += _flt(record.get("maternity_employee"))
+		target["maternity_employer"] += _flt(record.get("maternity_employer"))
+		target["cbhi"] += _flt(record.get("cbhi"))
+		target["rpf"] += _flt(record.get("rpf"))
+		target["insurance_sanlam"] += _flt(record.get("insurance_sanlam"))
+		target["insurance_prime"] += _flt(record.get("insurance_prime"))
+		label = (record.get("payroll_period_label") or "Variable").strip()
+		if label and label not in labels:
+			labels.append(label)
+		for field in (
+			"employee_name",
+			"position",
+			"department",
+			"company",
+			"account_number",
+			"bank",
+		):
+			if record.get(field) and not target.get(field):
+				target[field] = record.get(field)
+	target["gross_variable"] = gross_variable
+	target["bonus_incentives"] = bonus_incentives
+	target["variable_labels"] = labels
+	target["gross_salary"] = _flt(target.get("gross_staff")) + _flt(target.get("gross_lumpsum")) + gross_variable
+	target["net_salary"] = _flt(target.get("net_salary")) + variable_net
+	target["take_home"] = target["net_salary"]
 
 
 def _apply_lumpsum_record_to_merged(target: dict, record: dict) -> None:
@@ -440,11 +502,20 @@ def _merge_records_by_payroll_month(records: list[dict], scope: dict | None = No
 	for month_key, bucket in by_month.items():
 		staff = bucket.get("staff")
 		lumpsum = bucket.get("lumpsum")
+		variables = bucket.get("variables") or []
 		if staff and not lumpsum:
 			lumpsum = _match_lumpsum_for_staff(staff, filtered)
 		if lumpsum and not staff:
 			staff = _match_staff_for_lumpsum(lumpsum, filtered)
-		merged_list.append(_merge_staff_and_lumpsum(staff, lumpsum, month_key))
+		if not staff and not lumpsum and not variables:
+			continue
+		merged = _merge_staff_and_lumpsum(staff, lumpsum, month_key)
+		if not staff and not lumpsum and variables:
+			merged = _new_merged_payslip_row(variables[0], month_key)
+			merged["gross_variable"] = 0.0
+			merged["variable_labels"] = []
+		_apply_variable_records_to_merged(merged, variables)
+		merged_list.append(merged)
 
 	for row in merged_list:
 		row["payroll_period_label"] = _payslip_pay_period_label(row, row.get("payroll_month"))
@@ -472,7 +543,7 @@ def _match_staff_for_lumpsum(lumpsum: dict, records: list[dict]) -> dict | None:
 	month_key = getdate(lumpsum.get("payroll_month")).isoformat() if lumpsum.get("payroll_month") else None
 	lumpsum_account = (lumpsum.get("account_number") or "").strip()
 	for record in sorted(records, key=_record_sort_key, reverse=True):
-		if _is_lumpsum_record(record):
+		if _is_lumpsum_record(record) or _is_variable_record(record):
 			continue
 		if month_key and getdate(record.get("payroll_month")).isoformat() != month_key:
 			continue
@@ -496,6 +567,7 @@ def _new_merged_payslip_row(seed: dict, month_key: str) -> dict:
 		"account_number": seed.get("account_number"),
 		"bank": seed.get("bank"),
 		"basic_salary": 0.0,
+		"bonus_incentives": 0.0,
 		"ict_allowance": 0.0,
 		"itc_allowance": 0.0,
 		"gross_staff": 0.0,
@@ -572,6 +644,13 @@ def _update_employee_header(doc, record: dict) -> None:
 				if prefix == "DEPARTMENT:":
 					department_para = paragraph
 
+	variable_labels = [label for label in (record.get("variable_labels") or []) if label]
+	if variable_labels and department_para:
+		_insert_paragraph_after(
+			department_para,
+			"",
+		)
+
 	if department_para and not any(
 		(p.text or "").startswith("ACCOUNT NUMBER:") for p in doc.paragraphs
 	):
@@ -579,6 +658,82 @@ def _update_employee_header(doc, record: dict) -> None:
 		bank = (record.get("bank") or "").strip() or "-"
 		acc_para = _insert_paragraph_after(department_para, f"ACCOUNT NUMBER: {acc}")
 		_insert_paragraph_after(acc_para, f"BENEFICIARY BANK: {bank}")
+
+
+def _insert_bonus_column(table) -> None:
+	"""Add Bonus and other Incentives immediately after Basic Salary."""
+	from docx.oxml.ns import qn
+
+	tbl = table._tbl
+	grid = tbl.find(qn("w:tblGrid"))
+	cols = list(grid.findall(qn("w:gridCol")))
+	new_col = deepcopy(cols[2])
+	new_col.set(qn("w:w"), str(BONUS_COLUMN_WIDTH))
+	cols[2].addnext(new_col)
+
+	for tr in tbl.tr_lst:
+		col = 0
+		basic_tc = None
+		for tc in list(tr.tc_lst):
+			tc_pr = tc.find(qn("w:tcPr"))
+			span = 1
+			if tc_pr is not None:
+				grid_span = tc_pr.find(qn("w:gridSpan"))
+				if grid_span is not None:
+					span = int(grid_span.get(qn("w:val")) or 1)
+			if col == 2:
+				basic_tc = tc
+				break
+			col += span
+		if basic_tc is None:
+			continue
+		new_tc = deepcopy(basic_tc)
+		for text_node in new_tc.findall(".//" + qn("w:t")):
+			text_node.text = ""
+		tc_pr = new_tc.find(qn("w:tcPr"))
+		if tc_pr is not None:
+			width = tc_pr.find(qn("w:tcW"))
+			if width is not None:
+				width.set(qn("w:w"), str(BONUS_COLUMN_WIDTH))
+		basic_tc.addnext(new_tc)
+
+	_fit_table_width(table)
+
+
+def _fit_table_width(table, target: int = 14845) -> None:
+	from docx.oxml.ns import qn
+
+	tbl = table._tbl
+	grid_cols = list(tbl.find(qn("w:tblGrid")).findall(qn("w:gridCol")))
+	current = sum(int(col.get(qn("w:w")) or 0) for col in grid_cols)
+	if not current or current == target:
+		return
+	scaled = [max(80, int(int(col.get(qn("w:w")) or 0) * target / current)) for col in grid_cols]
+	scaled[-1] += target - sum(scaled)
+	for col, width in zip(grid_cols, scaled):
+		col.set(qn("w:w"), str(max(width, 80)))
+	for tr in tbl.tr_lst:
+		for tc in tr.tc_lst:
+			tc_pr = tc.find(qn("w:tcPr"))
+			if tc_pr is None:
+				continue
+			width = tc_pr.find(qn("w:tcW"))
+			if width is None or not width.get(qn("w:w")):
+				continue
+			width.set(qn("w:w"), str(max(80, int(int(width.get(qn("w:w"))) * target / current))))
+
+
+def _set_cell_label(cell, text: str) -> None:
+	paragraphs = cell.paragraphs
+	if not paragraphs or not paragraphs[0].runs:
+		cell.text = text
+		return
+	paragraphs[0].runs[0].text = text
+	for run in paragraphs[0].runs[1:]:
+		run.text = ""
+	for paragraph in paragraphs[1:]:
+		for run in paragraph.runs:
+			run.text = ""
 
 
 def _ensure_table_columns(table, target_cols: int) -> None:
@@ -592,10 +747,13 @@ def _ensure_table_columns(table, target_cols: int) -> None:
 def _set_payslip_table_headers(table) -> None:
 	if len(table.rows) < 2:
 		return
+	header = table.rows[0]
+	if len(header.cells) > 3:
+		_set_cell_label(header.cells[3], "Bonus and other Incentives")
 	for header_row_idx in (0, 1):
 		row = table.rows[header_row_idx]
-		if len(row.cells) > 4:
-			row.cells[4].text = "Gross Lumpsum"
+		if len(row.cells) > 5:
+			_set_cell_label(row.cells[5], "Gross Lumpsum")
 
 
 def _trim_table_data_rows(table, first_data_row: int, display_rows: int) -> None:
@@ -700,7 +858,7 @@ def build_payslip_docx(
 
 	table = doc.tables[0]
 	first_data_row = 2
-	_ensure_table_columns(table, PAYSLIP_TABLE_COLS)
+	_insert_bonus_column(table)
 	_set_payslip_table_headers(table)
 
 	while len(table.rows) < first_data_row + display_rows:
@@ -754,6 +912,7 @@ def _record_to_table_row(record: dict) -> list[str]:
 		pay_period,
 		payment_date,
 		_fmt(record.get("basic_salary")),
+		_fmt(record.get("bonus_incentives")),
 		_fmt(record.get("ict_allowance")),
 		_fmt(gross_lumpsum) if gross_lumpsum else "-",
 		_fmt(gross_salary),

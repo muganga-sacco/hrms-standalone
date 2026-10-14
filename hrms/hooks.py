@@ -40,6 +40,7 @@ app_include_css = "hrms.bundle.css"
 
 # include js in doctype views
 doctype_js = {
+	"Employee": "payroll/payroll_import/employee_payroll_id.js",
 	"Imported Payroll Record": "payroll/doctype/imported_payroll_record/imported_payroll_record_api.js",
 	"Payslip Request": "payroll/doctype/payslip_request/payslip_request.js",
 	"Payroll Excel Upload": "payroll/doctype/payroll_excel_upload/payroll_excel_upload.js",
@@ -99,6 +100,7 @@ after_install = "hrms.install.after_install"
 after_migrate = [
 	"basic.setup.update_select_perm_after_install",
 	"hrms.payroll.setup.ensure_payroll_dashboard_permissions.ensure_payroll_dashboard_permissions",
+	"hrms.payroll.payroll_import.employee_id_setup.ensure_employee_id_field",
 ]
 
 # Uninstallation
@@ -173,10 +175,14 @@ doc_events = {
     },
     "Timesheet": {"validate": "hrms.hr.utils.validate_active_employee"},
     "Employee": {
-        "validate": "hrms.overrides.employee_master.validate_onboarding_process",
+        "validate": [
+            "hrms.overrides.employee_master.validate_onboarding_process",
+            "hrms.payroll.payroll_import.payroll_employee_link.validate_unique_payroll_id",
+        ],
         "on_update": [
             "hrms.overrides.employee_master.update_approver_role",
             "hrms.overrides.employee_master.publish_update",
+            "hrms.payroll.payroll_import.payroll_employee_link.on_employee_payroll_id_update",
         ],
         "after_insert": "hrms.overrides.employee_master.update_job_applicant_and_offer",
         "on_trash": "hrms.overrides.employee_master.update_employee_transfer",

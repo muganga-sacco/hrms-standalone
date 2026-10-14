@@ -121,7 +121,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Payroll Sheet Type",
-   "options": "Staff Payroll\nLumpsum",
+   "options": "Staff Payroll\nLumpsum\nVariable",
    "reqd": 1
   },
   {
