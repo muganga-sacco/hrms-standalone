@@ -5,13 +5,13 @@ import frappe
 from frappe import _
 from frappe.utils import getdate
 
-from hrms.payroll.payroll_import.payroll_month_export import EXPORT_COLUMNS
+from hrms.payroll.payroll_import.payroll_month_export import DATA_COLUMNS
 
 
 def execute(filters=None):
-	from hrms.payroll.payroll_import.payroll_access import throw_if_not_hr_payroll
+	from hrms.payroll.payroll_import.payroll_access import throw_if_not_payroll_dashboard_viewer
 
-	throw_if_not_hr_payroll()
+	throw_if_not_payroll_dashboard_viewer()
 	filters = filters or {}
 	columns = _get_columns()
 	data = _get_data(filters)
@@ -33,9 +33,16 @@ def _get_columns():
 			"width": 140,
 		},
 	]
-	for fieldname, label in EXPORT_COLUMNS[2:]:
-		fieldtype = "Date" if fieldname == "date_of_joining" else "Currency"
-		if fieldname in ("position", "account_number", "bank"):
+	seen = {"employee_id_number", "employee_name"}
+	for fieldname, label, is_numeric in DATA_COLUMNS:
+		if not fieldname or fieldname in seen:
+			continue
+		seen.add(fieldname)
+		if fieldname == "date_of_joining":
+			fieldtype = "Date"
+		elif is_numeric:
+			fieldtype = "Currency"
+		else:
 			fieldtype = "Data"
 		columns.append(
 			{
@@ -68,7 +75,12 @@ def _get_data(filters):
 
 		query_filters["payroll_month"] = normalize_payroll_month(filters["payroll_month"])
 
-	fields = ["employee_id_number", "employee_name"] + [f[0] for f in EXPORT_COLUMNS[2:]]
+	fields = []
+	seen = set()
+	for fieldname, _label, _is_numeric in DATA_COLUMNS:
+		if fieldname and fieldname not in seen:
+			seen.add(fieldname)
+			fields.append(fieldname)
 
 	return frappe.get_all(
 		"Imported Payroll Record",

@@ -309,11 +309,11 @@ def ensure_payroll_dashboard_permissions() -> dict:
 		if _ensure_page_role("staff-payroll-dashboard", role):
 			page_roles.append(role)
 
-	for role in VIEW_ONLY_ROLES:
-		if _ensure_report_role("Imported Payroll Register", role):
-			report_roles.append(role)
-		if _ensure_custom_docperm_flags("Imported Payroll Record", role, VIEWER_IMPORTED_PAYROLL_FLAGS):
-			doctype_read.setdefault("Imported Payroll Record", []).append(role)
+	# for role in VIEW_ONLY_ROLES:
+	# 	if _ensure_report_role("Imported Payroll Register", role):
+	# 		report_roles.append(role)
+	# 	if _ensure_custom_docperm_flags("Imported Payroll Record", role, VIEWER_IMPORTED_PAYROLL_FLAGS):
+	# 		doctype_read.setdefault("Imported Payroll Record", []).append(role)
 
 	payslip_self_service = _ensure_payslip_self_service_for_all_roles()
 	_ensure_variable_and_my_payroll_pages()
