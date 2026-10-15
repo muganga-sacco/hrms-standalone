@@ -18,7 +18,22 @@ from hrms.payroll.payroll_import.payroll_month_utils import normalize_employee_i
 
 
 def compact_payroll_id(value: str | None) -> str:
-	return re.sub(r"\s+", "", normalize_employee_id_number(value)).lower()
+	"""Compare key for an ID NUMBER: spacing ignored, and 080 matches 80."""
+	compact = re.sub(r"\s+", "", normalize_employee_id_number(value)).lower()
+	if compact.isdigit():
+		compact = compact.lstrip("0") or "0"
+	return compact
+
+
+def sql_compact_payroll_id(column: str) -> str:
+	"""SQL expression with the same rules as compact_payroll_id for a column name."""
+	raw = f"REPLACE(LOWER(IFNULL({column}, '')), ' ', '')"
+	stripped = f"TRIM(LEADING '0' FROM {raw})"
+	return (
+		f"CASE WHEN {raw} REGEXP '^[0-9]+$' "
+		f"THEN IF({stripped} = '', '0', {stripped}) "
+		f"ELSE {raw} END"
+	)
 
 
 def find_employee_for_payroll_id(employee_id: str | None) -> str | None:
@@ -55,14 +70,16 @@ def payroll_id_variants(payroll_id: str | None) -> list[str]:
 	normalized = normalize_employee_id_number(payroll_id)
 	compact = compact_payroll_id(normalized)
 	variants = {normalized} if normalized else set()
+	if compact:
+		variants.add(compact)
 	if not compact:
 		return [v for v in variants if v]
 	rows = frappe.db.sql(
-		"""
+		f"""
 		SELECT DISTINCT employee_id_number
 		FROM `tabImported Payroll Record`
 		WHERE docstatus < 2
-			AND REPLACE(LOWER(IFNULL(employee_id_number, '')), ' ', '') = %s
+			AND {sql_compact_payroll_id("employee_id_number")} = %s
 		""",
 		compact,
 		pluck=True,
@@ -79,11 +96,11 @@ def link_imported_payroll_to_employee(employee: str, payroll_id: str | None) -> 
 	if not compact:
 		return 0
 	rows = frappe.db.sql(
-		"""
+		f"""
 		SELECT name, employee
 		FROM `tabImported Payroll Record`
 		WHERE docstatus < 2
-			AND REPLACE(LOWER(IFNULL(employee_id_number, '')), ' ', '') = %s
+			AND {sql_compact_payroll_id("employee_id_number")} = %s
 		""",
 		compact,
 		as_dict=True,

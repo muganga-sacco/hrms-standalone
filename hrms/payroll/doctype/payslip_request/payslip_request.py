@@ -26,6 +26,8 @@ from hrms.payroll.payroll_import.payroll_access import (
 
 	user_can_request_own_payslip,
 
+	user_can_see_all_payslip_requests,
+
 	user_has_hr_payroll_access,
 
 )
@@ -163,7 +165,7 @@ def _own_payslip_rules(doc, ptype: str, user: str, employee: str | None) -> bool
 
 def get_permission_query_conditions(user: str) -> str:
 
-	if user_has_hr_payroll_access(user):
+	if user_can_see_all_payslip_requests(user):
 
 		return ""
 
@@ -197,9 +199,9 @@ def has_permission(doc, ptype: str, user: str) -> bool:
 
 	if user_has_hr_payroll_access(user):
 
-		if ptype == "export":
+		return True
 
-			return True
+	if user_can_see_all_payslip_requests(user) and ptype in ("read", "print", "report", "select"):
 
 		return True
 

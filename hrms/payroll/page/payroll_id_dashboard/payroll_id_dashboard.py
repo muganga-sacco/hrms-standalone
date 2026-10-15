@@ -12,15 +12,16 @@ from hrms.payroll.payroll_import.payroll_employee_link import (
 	compact_payroll_id,
 	find_employee_for_payroll_id,
 	link_imported_payroll_to_employee,
+	sql_compact_payroll_id,
 )
 from hrms.payroll.payroll_import.payroll_month_utils import normalize_employee_id_number
 
 
 def _payslip_counts() -> dict[str, dict[str, int]]:
 	rows = frappe.db.sql(
-		"""
+		f"""
 		SELECT
-			REPLACE(LOWER(IFNULL(employee_id_number, '')), ' ', '') AS compact_id,
+			{sql_compact_payroll_id("employee_id_number")} AS compact_id,
 			SUM(CASE WHEN payroll_sheet_type = 'Staff Payroll' THEN 1 ELSE 0 END) AS staff_count,
 			SUM(CASE WHEN payroll_sheet_type = 'Lumpsum' THEN 1 ELSE 0 END) AS lumpsum_count
 		FROM `tabImported Payroll Record`

@@ -8,6 +8,7 @@ from frappe.model.document import Document
 from hrms.payroll.payroll_import.payroll_access import throw_if_not_hr_payroll
 from hrms.payroll.payroll_import.payroll_employee_link import (
 	compact_payroll_id,
+	sql_compact_payroll_id,
 	find_employee_for_payroll_id,
 )
 from hrms.payroll.payroll_import.payroll_excel_parser import parse_payroll_excel
@@ -214,13 +215,13 @@ def _existing_payroll_record(employee_id: str, payroll_month, sheet_type: str) -
 	if not compact:
 		return None
 	found = frappe.db.sql(
-		"""
+		f"""
 		SELECT name
 		FROM `tabImported Payroll Record`
 		WHERE payroll_month = %s
 			AND payroll_sheet_type = %s
 			AND docstatus < 2
-			AND REPLACE(LOWER(IFNULL(employee_id_number, '')), ' ', '') = %s
+			AND {sql_compact_payroll_id("employee_id_number")} = %s
 		ORDER BY modified DESC
 		LIMIT 1
 		""",

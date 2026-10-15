@@ -8,6 +8,7 @@ from frappe import _
 
 HR_PAYROLL_ROLES = frozenset({"HR Manager", "HR User"})
 PAYROLL_DASHBOARD_VIEW_ROLES = frozenset({"DAF", "MD"})
+PAYSLIP_REQUEST_ALL_ROLES = frozenset({"HR Manager", "HR User", "DAF"})
 # Payslip self-service is not limited to Employee / Requester — any logged-in user (see user_can_request_own_payslip).
 
 
@@ -18,6 +19,16 @@ def user_has_hr_payroll_access(user: str | None = None) -> bool:
 	if user == "Administrator":
 		return True
 	return bool(HR_PAYROLL_ROLES & set(frappe.get_roles(user)))
+
+
+def user_can_see_all_payslip_requests(user: str | None = None) -> bool:
+	"""HR, DAF, and Administrator see every payslip request. Other staff see only their own."""
+	user = user or frappe.session.user
+	if user == "Guest":
+		return False
+	if user == "Administrator":
+		return True
+	return bool(PAYSLIP_REQUEST_ALL_ROLES & set(frappe.get_roles(user)))
 
 
 def user_can_view_staff_payroll_dashboard(user: str | None = None) -> bool:

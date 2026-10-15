@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [Angelique]
+  pull_request:
+    branches: [Angelique]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile Python
+        run: python -m compileall -f -q hrms scripts
+
+      - name: Reject merge conflict markers
+        run: |
+          set -e
+          if grep -lr --exclude-dir=.git --exclude-dir=node_modules "^<<<<<<< " .; then
+            echo "Found merge conflicts"
+            exit 1
+          fi
+          echo "No merge conflict markers."

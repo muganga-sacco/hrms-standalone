@@ -1,0 +1,55 @@
+# Pulls latest code in the HRMS app checkout, then runs scripts/deploy.sh.
+# Self-hosted runner must be installed on the bench server.
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [Angelique]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  APP_ROOT: ${{ vars.APP_ROOT || '/home/wngelique/frappe-bench/apps/hrms' }}
+  BENCH_ROOT: ${{ vars.BENCH_ROOT || '/home/wngelique/frappe-bench' }}
+  BENCH_SITE: ${{ vars.BENCH_SITE || 'mysite.local' }}
+  DEPLOY_BRANCH: Angelique
+
+jobs:
+  deploy:
+    # Only the bench-server runner. A shared org runner that only has
+    # [self-hosted, Linux] does not have this bench. Add the label "hrms"
+    # on that runner (Settings → Actions → Runners).
+    runs-on: [self-hosted, Linux, hrms]
+    steps:
+      - name: Confirm this is the bench server
+        shell: bash
+        run: |
+          set -e
+          echo "OS=$RUNNER_OS user=$(whoami) host=$(hostname)"
+          if [[ ! -d "$APP_ROOT/.git" ]]; then
+            echo "ERROR: $APP_ROOT is missing or is not a git clone."
+            echo "On the server, from the bench:"
+            echo "  cd $BENCH_ROOT"
+            echo "  bench get-app --branch Angelique https://github.com/muganga-sacco/hrms-standalone.git"
+            ls -la "$(dirname "$APP_ROOT")" || true
+            exit 1
+          fi
+
+      - name: Pull latest code (live app)
+        shell: bash
+        run: |
+          set -e
+          cd "$APP_ROOT"
+          git fetch origin
+          git checkout "$DEPLOY_BRANCH"
+          git pull --ff-only origin "$DEPLOY_BRANCH"
+
+      - name: Deploy
+        shell: bash
+        env:
+          BENCH_ROOT: ${{ env.BENCH_ROOT }}
+          BENCH_SITE: ${{ env.BENCH_SITE }}
+        run: bash "$APP_ROOT/scripts/deploy.sh"
