@@ -26,19 +26,12 @@ hrms.imported_payroll_record.download_payslip_dialog = function (defaults = {}) 
 				fieldtype: "Select",
 				label: __("Period"),
 				options: [
-					"Last N months",
+					"Last 3 months",
 					"Single payroll month",
 					"From month – To month",
 				].join("\n"),
-				default: "Last N months",
+				default: "Last 3 months",
 				reqd: 1,
-			},
-			{
-				fieldname: "months",
-				fieldtype: "Int",
-				label: __("Number of months"),
-				default: 3,
-				depends_on: 'eval:doc.mode=="Last N months"',
 			},
 			{
 				fieldname: "payroll_month",
@@ -63,8 +56,8 @@ hrms.imported_payroll_record.download_payslip_dialog = function (defaults = {}) 
 			const params = new URLSearchParams({
 				employee_id_number: values.employee_id_number,
 			});
-			if (values.mode === "Last N months") {
-				params.set("months", values.months || 3);
+			if (values.mode === "Last 3 months") {
+				params.set("months", 3);
 			} else if (values.mode === "Single payroll month") {
 				params.set("payroll_month", values.payroll_month);
 			} else {

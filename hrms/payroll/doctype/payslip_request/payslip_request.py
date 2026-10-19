@@ -96,9 +96,9 @@ class PayslipRequest(Document):
 
 		pt = self.period_type
 
-		if pt == "Last N months" and not self.months:
+		if pt in ("Last N months", "Last 3 months"):
 
-			frappe.throw(_("Number of months is required."))
+			self.months = 3
 
 		if pt == "Single payroll month" and not self.payroll_month:
 
@@ -441,9 +441,9 @@ def build_download_params_from_request(doc: Document) -> dict:
 
 	pt = doc.period_type
 
-	if pt == "Last N months":
+	if pt in ("Last N months", "Last 3 months"):
 
-		params["months"] = int(doc.months or 3)
+		params["months"] = 3
 
 	elif pt == "Single payroll month":
 

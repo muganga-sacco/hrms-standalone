@@ -618,19 +618,12 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 					fieldtype: "Select",
 					label: __("Period"),
 					options: [
-						"Last N months",
+						"Last 3 months",
 						"Single payroll month",
 						"From month – To month",
 					].join("\n"),
 					default: "Single payroll month",
 					reqd: 1,
-				},
-				{
-					fieldname: "months",
-					fieldtype: "Int",
-					label: __("Number of months"),
-					default: 3,
-					depends_on: 'eval:doc.mode=="Last N months"',
 				},
 				{
 					fieldname: "payroll_month",
@@ -662,8 +655,8 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 				const params = new URLSearchParams({
 					employee_id_number: employee_id,
 				});
-				if (values.mode === "Last N months") {
-					params.set("months", values.months || 3);
+				if (values.mode === "Last 3 months") {
+					params.set("months", 3);
 				} else if (values.mode === "Single payroll month") {
 					if (!values.payroll_month) {
 						frappe.msgprint(__("Payroll month is required."));

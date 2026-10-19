@@ -94,14 +94,14 @@
    "fieldname": "period_type",
    "fieldtype": "Select",
    "label": "Period Type",
-   "options": "Last N months\nSingle payroll month\nFrom month \u2013 To month",
+   "options": "Last 3 months\nSingle payroll month\nFrom month \u2013 To month",
    "reqd": 1
   },
   {
    "default": "3",
-   "depends_on": "eval:doc.period_type==\"Last N months\"",
    "fieldname": "months",
    "fieldtype": "Int",
+   "hidden": 1,
    "label": "Number of Months"
   },
   {
@@ -142,7 +142,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-24 10:00:00.000000",
+ "modified": "2026-10-19 08:34:00.000000",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Payslip Request",

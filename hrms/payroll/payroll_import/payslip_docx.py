@@ -104,6 +104,7 @@ PAYSLIP_FIELDS = [
 	"payroll_month",
 	"payment_date",
 	"basic_salary",
+	"transport_allowance",
 	"ict_allowance",
 	"itc_allowance",
 	"gross_salary",
@@ -129,8 +130,12 @@ PAYSLIP_FIELDS = [
 
 MAX_PAYSLIP_MONTHS = 24
 MAX_PAYSLIP_ROWS_ONE_PAGE = 3
-PAYSLIP_TABLE_COLS = 15
+# Template grid is 14 columns, including ICT Allowance. Transport, TC Allowance,
+# and Bonus are inserted. ICT is removed when no row has an ICT amount.
+PAYSLIP_TABLE_COLS_WITH_ICT = 17
+PAYSLIP_TABLE_COLS_WITHOUT_ICT = 16
 BONUS_COLUMN_WIDTH = 1600
+ALLOWANCE_COLUMN_WIDTH = 1154
 
 
 def get_payroll_records_for_payslip(
@@ -377,6 +382,7 @@ def _merge_staff_and_lumpsum(staff: dict | None, lumpsum: dict | None, month_key
 
 def _apply_staff_record_to_merged(target: dict, record: dict) -> None:
 	target["basic_salary"] = _flt(record.get("basic_salary"))
+	target["transport_allowance"] = _flt(record.get("transport_allowance"))
 	target["ict_allowance"] = _flt(record.get("ict_allowance"))
 	target["itc_allowance"] = _flt(record.get("itc_allowance"))
 	target["gross_staff"] = _flt(record.get("gross_salary"))
@@ -417,7 +423,9 @@ def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> No
 		# Basic salary on the payslip stays the staff figure.
 		# The variable sheet's Basic salary is the bonus column.
 		bonus_incentives += _flt(record.get("basic_salary"))
-		target["ict_allowance"] += _flt(record.get("ict_allowance")) + _flt(record.get("itc_allowance"))
+		target["transport_allowance"] += _flt(record.get("transport_allowance"))
+		target["itc_allowance"] += _flt(record.get("itc_allowance"))
+		target["ict_allowance"] += _flt(record.get("ict_allowance"))
 		gross_variable += _flt(record.get("gross_salary"))
 		variable_net += _flt(record.get("net_salary")) or _flt(record.get("take_home"))
 		target["paye"] += _flt(record.get("paye"))
@@ -567,6 +575,7 @@ def _new_merged_payslip_row(seed: dict, month_key: str) -> dict:
 		"account_number": seed.get("account_number"),
 		"bank": seed.get("bank"),
 		"basic_salary": 0.0,
+		"transport_allowance": 0.0,
 		"bonus_incentives": 0.0,
 		"ict_allowance": 0.0,
 		"itc_allowance": 0.0,
@@ -660,44 +669,125 @@ def _update_employee_header(doc, record: dict) -> None:
 		_insert_paragraph_after(acc_para, f"BENEFICIARY BANK: {bank}")
 
 
-def _insert_bonus_column(table) -> None:
-	"""Add Bonus and other Incentives immediately after Basic Salary."""
+def _tc_span(tc) -> int:
+	from docx.oxml.ns import qn
+
+	tc_pr = tc.find(qn("w:tcPr"))
+	if tc_pr is None:
+		return 1
+	grid_span = tc_pr.find(qn("w:gridSpan"))
+	if grid_span is None:
+		return 1
+	return int(grid_span.get(qn("w:val")) or 1)
+
+
+def _set_tc_text(tc, text: str) -> None:
+	from docx.oxml.ns import qn
+
+	text_nodes = tc.findall(".//" + qn("w:t"))
+	if not text_nodes:
+		return
+	text_nodes[0].text = text
+	for node in text_nodes[1:]:
+		node.text = ""
+
+
+def _find_tc_at_grid_col(tr, grid_col: int):
+	col = 0
+	for tc in tr.tc_lst:
+		span = _tc_span(tc)
+		if col == grid_col:
+			return tc
+		col += span
+	return None
+
+
+def _insert_column_after(table, after_grid_col: int, label: str, width: int) -> None:
+	"""Insert one column immediately after a grid column. Header text is set on row 0."""
 	from docx.oxml.ns import qn
 
 	tbl = table._tbl
 	grid = tbl.find(qn("w:tblGrid"))
 	cols = list(grid.findall(qn("w:gridCol")))
-	new_col = deepcopy(cols[2])
-	new_col.set(qn("w:w"), str(BONUS_COLUMN_WIDTH))
-	cols[2].addnext(new_col)
+	if after_grid_col < 0 or after_grid_col >= len(cols):
+		return
+	new_col = deepcopy(cols[after_grid_col])
+	new_col.set(qn("w:w"), str(width))
+	cols[after_grid_col].addnext(new_col)
 
-	for tr in tbl.tr_lst:
-		col = 0
-		basic_tc = None
-		for tc in list(tr.tc_lst):
-			tc_pr = tc.find(qn("w:tcPr"))
-			span = 1
-			if tc_pr is not None:
-				grid_span = tc_pr.find(qn("w:gridSpan"))
-				if grid_span is not None:
-					span = int(grid_span.get(qn("w:val")) or 1)
-			if col == 2:
-				basic_tc = tc
-				break
-			col += span
-		if basic_tc is None:
+	for row_idx, tr in enumerate(tbl.tr_lst):
+		anchor = _find_tc_at_grid_col(tr, after_grid_col)
+		if anchor is None:
 			continue
-		new_tc = deepcopy(basic_tc)
+		new_tc = deepcopy(anchor)
 		for text_node in new_tc.findall(".//" + qn("w:t")):
 			text_node.text = ""
 		tc_pr = new_tc.find(qn("w:tcPr"))
 		if tc_pr is not None:
-			width = tc_pr.find(qn("w:tcW"))
-			if width is not None:
-				width.set(qn("w:w"), str(BONUS_COLUMN_WIDTH))
-		basic_tc.addnext(new_tc)
+			width_node = tc_pr.find(qn("w:tcW"))
+			if width_node is not None:
+				width_node.set(qn("w:w"), str(width))
+		if row_idx == 0 and label:
+			_set_tc_text(new_tc, label)
+		anchor.addnext(new_tc)
 
+
+def _remove_grid_column(table, grid_col: int) -> None:
+	from docx.oxml.ns import qn
+
+	tbl = table._tbl
+	grid = tbl.find(qn("w:tblGrid"))
+	cols = list(grid.findall(qn("w:gridCol")))
+	if grid_col < 0 or grid_col >= len(cols):
+		return
+	grid.remove(cols[grid_col])
+	for tr in tbl.tr_lst:
+		col = 0
+		for tc in list(tr.tc_lst):
+			span = _tc_span(tc)
+			if col <= grid_col < col + span:
+				if span == 1:
+					tr.remove(tc)
+				else:
+					tc_pr = tc.find(qn("w:tcPr"))
+					grid_span = tc_pr.find(qn("w:gridSpan")) if tc_pr is not None else None
+					if grid_span is not None:
+						grid_span.set(qn("w:val"), str(span - 1))
+				break
+			col += span
+
+
+def _set_grid_header(table, grid_col: int, label: str) -> None:
+	if not table._tbl.tr_lst:
+		return
+	tc = _find_tc_at_grid_col(table._tbl.tr_lst[0], grid_col)
+	if tc is not None:
+		_set_tc_text(tc, label)
+
+
+def _payslip_has_ict(records: list[dict]) -> bool:
+	return any(_flt(record.get("ict_allowance")) for record in records)
+
+
+def _prepare_payslip_earning_columns(table, include_ict: bool) -> int:
+	"""Place Transport and TC Allowance after Basic Salary.
+
+	ICT Allowance is kept only when a payslip row has an ICT amount.
+	Bonus and other Incentives follows those allowance columns.
+	"""
+	_insert_column_after(table, 2, "Transport", ALLOWANCE_COLUMN_WIDTH)
+	_insert_column_after(table, 3, "TC Allowance", ALLOWANCE_COLUMN_WIDTH)
+	if include_ict:
+		bonus_after = 5
+		lumpsum_col = 7
+	else:
+		_remove_grid_column(table, 5)
+		bonus_after = 4
+		lumpsum_col = 6
+	_insert_column_after(table, bonus_after, "Bonus and other Incentives", BONUS_COLUMN_WIDTH)
+	_set_grid_header(table, lumpsum_col, "Gross Lumpsum")
 	_fit_table_width(table)
+	return PAYSLIP_TABLE_COLS_WITH_ICT if include_ict else PAYSLIP_TABLE_COLS_WITHOUT_ICT
 
 
 def _fit_table_width(table, target: int = 14845) -> None:
@@ -723,37 +813,12 @@ def _fit_table_width(table, target: int = 14845) -> None:
 			width.set(qn("w:w"), str(max(80, int(int(width.get(qn("w:w"))) * target / current))))
 
 
-def _set_cell_label(cell, text: str) -> None:
-	paragraphs = cell.paragraphs
-	if not paragraphs or not paragraphs[0].runs:
-		cell.text = text
-		return
-	paragraphs[0].runs[0].text = text
-	for run in paragraphs[0].runs[1:]:
-		run.text = ""
-	for paragraph in paragraphs[1:]:
-		for run in paragraph.runs:
-			run.text = ""
-
-
 def _ensure_table_columns(table, target_cols: int) -> None:
 	for row in table.rows:
 		while len(row.cells) > target_cols:
 			row._tr.remove(row.cells[-1]._tc)
 		while len(row.cells) < target_cols:
 			row._tr.append(deepcopy(row.cells[-1]._tc))
-
-
-def _set_payslip_table_headers(table) -> None:
-	if len(table.rows) < 2:
-		return
-	header = table.rows[0]
-	if len(header.cells) > 3:
-		_set_cell_label(header.cells[3], "Bonus and other Incentives")
-	for header_row_idx in (0, 1):
-		row = table.rows[header_row_idx]
-		if len(row.cells) > 5:
-			_set_cell_label(row.cells[5], "Gross Lumpsum")
 
 
 def _trim_table_data_rows(table, first_data_row: int, display_rows: int) -> None:
@@ -858,12 +923,12 @@ def build_payslip_docx(
 
 	table = doc.tables[0]
 	first_data_row = 2
-	_insert_bonus_column(table)
-	_set_payslip_table_headers(table)
+	include_ict = _payslip_has_ict(records)
+	table_cols = _prepare_payslip_earning_columns(table, include_ict)
 
 	while len(table.rows) < first_data_row + display_rows:
 		table.add_row()
-	_ensure_table_columns(table, PAYSLIP_TABLE_COLS)
+	_ensure_table_columns(table, table_cols)
 
 	for row_idx in range(first_data_row, len(table.rows)):
 		for cell in table.rows[row_idx].cells:
@@ -871,7 +936,7 @@ def build_payslip_docx(
 
 	for idx, record in enumerate(records):
 		row = table.rows[first_data_row + idx]
-		values = _record_to_table_row(record)
+		values = _record_to_table_row(record, include_ict=include_ict)
 		for col_idx, value in enumerate(values):
 			if col_idx < len(row.cells):
 				row.cells[col_idx].text = value
@@ -885,7 +950,7 @@ def build_payslip_docx(
 	return buffer.getvalue()
 
 
-def _record_to_table_row(record: dict) -> list[str]:
+def _record_to_table_row(record: dict, include_ict: bool = False) -> list[str]:
 	pay_period = _payslip_pay_period_label(record)
 	payment_date = record.get("payment_date")
 	if payment_date:
@@ -908,12 +973,17 @@ def _record_to_table_row(record: dict) -> list[str]:
 		net = _flt(record.get("take_home"))
 	total_deductions = gross_salary - net if gross_salary and net else 0.0
 
-	return [
+	values = [
 		pay_period,
 		payment_date,
 		_fmt(record.get("basic_salary")),
+		_fmt(record.get("transport_allowance")),
+		_fmt(record.get("itc_allowance")),
+	]
+	if include_ict:
+		values.append(_fmt(record.get("ict_allowance")))
+	values.extend([
 		_fmt(record.get("bonus_incentives")),
-		_fmt(record.get("ict_allowance")),
 		_fmt(gross_lumpsum) if gross_lumpsum else "-",
 		_fmt(gross_salary),
 		_fmt(record.get("paye")),
@@ -924,7 +994,8 @@ def _record_to_table_row(record: dict) -> list[str]:
 		_fmt(other_deductions) if other_deductions else "-",
 		_fmt(total_deductions),
 		_fmt(net),
-	]
+	])
+	return values
 
 
 def _txt(val) -> str:
