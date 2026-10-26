@@ -34,6 +34,48 @@ from hrms.payroll.payroll_import.payroll_access import (
 
 
 
+PAYSLIP_MONTHS = (
+
+	"January",
+
+	"February",
+
+	"March",
+
+	"April",
+
+	"May",
+
+	"June",
+
+	"July",
+
+	"August",
+
+	"September",
+
+	"October",
+
+	"November",
+
+	"December",
+
+)
+
+
+
+
+
+def _date_from_year_month(year, month_name):
+
+	if not year or month_name not in PAYSLIP_MONTHS:
+
+		return None
+
+	return f"{int(year)}-{PAYSLIP_MONTHS.index(month_name) + 1:02d}-01"
+
+
+
 
 
 class PayslipRequest(Document):
@@ -100,11 +142,31 @@ class PayslipRequest(Document):
 
 			self.months = 3
 
-		if pt == "Single payroll month" and not self.payroll_month:
+		if pt == "Single payroll month":
 
-			frappe.throw(_("Payroll month is required."))
+			composed = _date_from_year_month(self.payroll_year, self.payroll_month_name)
+
+			if composed:
+
+				self.payroll_month = composed
+
+			if not self.payroll_month:
+
+				frappe.throw(_("Year and Month are required."))
 
 		if pt == "From month – To month":
+
+			composed_from = _date_from_year_month(self.payroll_year, self.payroll_month_name)
+
+			composed_to = _date_from_year_month(self.to_year, self.to_month_name)
+
+			if composed_from:
+
+				self.from_month = composed_from
+
+			if composed_to:
+
+				self.to_month = composed_to
 
 			if not self.from_month or not self.to_month:
 

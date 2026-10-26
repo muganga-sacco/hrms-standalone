@@ -309,9 +309,15 @@ def _build_column_map(headers: list[str], sub_header_rows: list[tuple]) -> dict[
 		"take_home": "take_home",
 		"position": "position",
 		"date_of_joining": "date_of_joining",
+		"transport": "transport_allowance",
 		"transport_allowance": "transport_allowance",
 		"transport_allowance_cro": "transport_allowance",
+		"transport_allowance_cr0": "transport_allowance",
+		"tc": "itc_allowance",
+		"tc_allowance": "itc_allowance",
+		"itc": "itc_allowance",
 		"itc_allowance": "itc_allowance",
+		"ict": "ict_allowance",
 		"ict_allowance": "ict_allowance",
 		"net_before_cbhi": "net_before_cbhi",
 		"rssb_cbhi_scheme_0_5": "cbhi",
@@ -410,10 +416,9 @@ def _apply_fuzzy_field_map(by_key: dict[str, int], field_map: dict[str, int]) ->
 			"compulsory_saving",
 			lambda k: "compulsory" in k and "saving" in k and "account" not in k,
 		),
-		("transport_allowance", lambda k: "transport" in k and "allowance" in k),
-		("transport_allowance", lambda k: k in ("cro",) or k.endswith("_cro")),
-		("itc_allowance", lambda k: "itc" in k and "allowance" in k),
-		("ict_allowance", lambda k: "ict" in k and "allowance" in k),
+		("ict_allowance", _is_ict_allowance_header),
+		("itc_allowance", _is_tc_allowance_header),
+		("transport_allowance", _is_transport_header),
 		("paye", lambda k: "paye" in k),
 		("pension_employee", lambda k: "pension" in k and "employee" in k),
 		("pension_employer", lambda k: "pension" in k and "employer" in k and "oh" not in k),
@@ -441,6 +446,28 @@ def _apply_fuzzy_field_map(by_key: dict[str, int], field_map: dict[str, int]) ->
 			if predicate(key):
 				field_map[field] = idx
 				break
+
+
+def _header_tokens(key: str) -> set[str]:
+	return {part for part in key.split("_") if part}
+
+
+def _is_transport_header(key: str) -> bool:
+	"""Transport, with or without Allowance, CR0/CRO, or any other words."""
+	return any(part == "transport" or part.startswith("transport") for part in _header_tokens(key))
+
+
+def _is_ict_allowance_header(key: str) -> bool:
+	"""ICT Allowance. Extra words are ignored. ITC is a different column."""
+	return "ict" in _header_tokens(key)
+
+
+def _is_tc_allowance_header(key: str) -> bool:
+	"""TC or ITC Allowance. Extra words are ignored. ICT is not TC."""
+	if _is_ict_allowance_header(key):
+		return False
+	tokens = _header_tokens(key)
+	return "tc" in tokens or "itc" in tokens
 
 
 def _header_key(text: str) -> str:

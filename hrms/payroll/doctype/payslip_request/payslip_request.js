@@ -9,6 +9,106 @@ function payslip_hr_picks_employee() {
 	return payslip_is_hr_approver();
 }
 
+const PAYSLIP_MONTHS = [
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+];
+
+function payslip_period_from_date(value) {
+	if (value) {
+		const parts = String(value).split("-");
+		const month_index = parseInt(parts[1] || "1", 10) - 1;
+		if (parts[0] && month_index >= 0 && month_index <= 11) {
+			return { year: parts[0], month_name: PAYSLIP_MONTHS[month_index] };
+		}
+	}
+	const now = frappe.datetime.str_to_obj(frappe.datetime.nowdate());
+	return { year: String(now.getFullYear()), month_name: PAYSLIP_MONTHS[now.getMonth()] };
+}
+
+function payslip_date_from_period(year, month_name) {
+	const month_index = PAYSLIP_MONTHS.indexOf(month_name);
+	if (!year || month_index < 0) {
+		return "";
+	}
+	return `${year}-${String(month_index + 1).padStart(2, "0")}-01`;
+}
+
+function payslip_show_select(frm, fieldname, value) {
+	const field = frm.fields_dict[fieldname];
+	// set_input before the <select> exists records the option list and then
+	// refuses to fill the real dropdown, so the field stays blank.
+	if (field && field.$input && field.$input[0] && !field.$input[0].options.length) {
+		field.last_options = null;
+		field.set_options();
+	}
+	if (!value || frm.doc[fieldname] === value) {
+		if (value && field && field.$input) {
+			field.set_input(value);
+		}
+		return;
+	}
+	if (!field || !field.$input) {
+		frm.doc[fieldname] = value;
+		return;
+	}
+	frm.doc[fieldname] = value;
+	field.set_input(value);
+}
+
+function payslip_sync_single(frm) {
+	const value = payslip_date_from_period(frm.doc.payroll_year, frm.doc.payroll_month_name);
+	if (!value) {
+		return;
+	}
+	if (frm.doc.period_type === "From month – To month") {
+		if (frm.doc.from_month !== value) {
+			frm.set_value("from_month", value);
+		}
+		return;
+	}
+	if (frm.doc.payroll_month !== value) {
+		frm.set_value("payroll_month", value);
+	}
+}
+
+function payslip_sync_range(frm) {
+	const to_month = payslip_date_from_period(frm.doc.to_year, frm.doc.to_month_name);
+	if (to_month && frm.doc.to_month !== to_month) {
+		frm.set_value("to_month", to_month);
+	}
+	payslip_sync_single(frm);
+}
+
+function payslip_fill_period(frm) {
+	if ((frm.is_new() || frm.doc.status === "Draft") && frm.doc.period_type !== "From month – To month") {
+		frm.set_value("period_type", "From month – To month");
+	}
+	const is_range = frm.doc.period_type === "From month – To month";
+	const start = payslip_period_from_date(
+		is_range ? frm.doc.from_month || frm.doc.payroll_month : frm.doc.payroll_month
+	);
+	const to_period = payslip_period_from_date(frm.doc.to_month || frm.doc.payroll_month);
+	payslip_show_select(frm, "payroll_year", start.year);
+	payslip_show_select(frm, "payroll_month_name", start.month_name);
+	payslip_show_select(frm, "to_year", to_period.year);
+	payslip_show_select(frm, "to_month_name", to_period.month_name);
+	if (frm.is_new() || frm.doc.status === "Draft") {
+		payslip_sync_single(frm);
+		payslip_sync_range(frm);
+	}
+}
+
 frappe.ui.form.on("Payslip Request", {
 	setup(frm) {
 		if (!payslip_hr_picks_employee()) {
@@ -19,6 +119,7 @@ frappe.ui.form.on("Payslip Request", {
 	},
 
 	onload(frm) {
+		payslip_fill_period(frm);
 		if (frm.is_new() && !payslip_hr_picks_employee()) {
 			frappe.call({
 				method:
@@ -41,6 +142,7 @@ frappe.ui.form.on("Payslip Request", {
 	refresh(frm) {
 		frm.clear_custom_buttons();
 		const is_hr = payslip_is_hr_approver();
+		payslip_fill_period(frm);
 
 		if (!payslip_hr_picks_employee()) {
 			frm.set_df_property("employee", "read_only", 1);
@@ -110,12 +212,21 @@ frappe.ui.form.on("Payslip Request", {
 		}
 
 		if (!is_hr && frm.doc.status !== "Draft") {
-			frm.set_df_property("period_type", "read_only", 1);
-			frm.set_df_property("months", "read_only", 1);
-			frm.set_df_property("payroll_month", "read_only", 1);
-			frm.set_df_property("from_month", "read_only", 1);
-			frm.set_df_property("to_month", "read_only", 1);
-			frm.set_df_property("remarks", "read_only", 1);
+			[
+				"period_type",
+				"months",
+				"payroll_year",
+				"payroll_month_name",
+				"to_year",
+				"to_month_name",
+				"remarks",
+			].forEach((fieldname) => frm.set_df_property(fieldname, "read_only", 1));
 		}
 	},
+
+	payroll_year: payslip_sync_single,
+	payroll_month_name: payslip_sync_single,
+	period_type: payslip_sync_range,
+	to_year: payslip_sync_range,
+	to_month_name: payslip_sync_range,
 });

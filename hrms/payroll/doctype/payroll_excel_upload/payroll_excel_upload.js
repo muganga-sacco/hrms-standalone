@@ -77,17 +77,134 @@ function patch_payroll_file_attach_button(frm) {
 	attach.on_attach_click = () => upload_payroll_file_via_api(frm);
 }
 
+const PAYROLL_MONTHS = [
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+];
+
+function selected_payroll_period(frm) {
+	const raw = frm.doc.payroll_month;
+	if (raw) {
+		const parts = String(raw).split("-");
+		const year = parts[0];
+		const month_index = parseInt(parts[1] || "1", 10) - 1;
+		if (year && month_index >= 0 && month_index <= 11) {
+			return { year, month_index };
+		}
+	}
+	const now = frappe.datetime.str_to_obj(frappe.datetime.nowdate());
+	return { year: String(now.getFullYear()), month_index: now.getMonth() };
+}
+
+function write_payroll_month(frm) {
+	const year = frm.doc.payroll_year;
+	const month_index = PAYROLL_MONTHS.indexOf(frm.doc.payroll_month_name);
+	if (!year || month_index < 0) {
+		return;
+	}
+	const value = `${year}-${String(month_index + 1).padStart(2, "0")}-01`;
+	if (frm.doc.payroll_month !== value) {
+		frm.set_value("payroll_month", value);
+	}
+}
+
+function apply_company(frm, company) {
+	if (!company) {
+		return;
+	}
+	const field = frm.fields_dict.company;
+	if (field) {
+		field.value = company;
+		if (field.set_disp_area) {
+			field.set_disp_area(company);
+		}
+	}
+	if (frm.doc.company === company) {
+		field && field.refresh();
+		return;
+	}
+	frm.doc.company = company;
+	return frm.set_value("company", company);
+}
+
+function fill_company(frm) {
+	const preferred =
+		frappe.defaults.get_user_default("Company") || frappe.defaults.get_default("company");
+	if (frm.doc.company) {
+		return Promise.resolve(apply_company(frm, frm.doc.company));
+	}
+	if (!frm._company_lookup) {
+		frm._company_lookup = frappe.db
+			.get_list("Company", { fields: ["name"], order_by: "name asc", limit: 20 })
+			.then((rows) => {
+				const names = (rows || []).map((row) => row.name).filter(Boolean);
+				return names.includes(preferred) ? preferred : names[0] || preferred || "";
+			})
+			.catch(() => preferred || "");
+	}
+	return frm._company_lookup.then((company) => apply_company(frm, company));
+}
+
+function fill_period(frm) {
+	if (frm._period_initialized || !frm.fields_dict.payroll_year) {
+		return;
+	}
+	frm._period_initialized = true;
+	const period = frm.is_new() ? selected_payroll_period({ doc: {} }) : selected_payroll_period(frm);
+	const year = String(period.year);
+	const month_name = PAYROLL_MONTHS[period.month_index];
+	if (frm.doc.payroll_year !== year) {
+		frm.set_value("payroll_year", year);
+	}
+	if (frm.doc.payroll_month_name !== month_name) {
+		frm.set_value("payroll_month_name", month_name);
+	}
+	write_payroll_month(frm);
+}
+
 frappe.ui.form.on("Payroll Excel Upload", {
+	setup(frm) {
+		const now = frappe.datetime.str_to_obj(frappe.datetime.nowdate());
+		const year_df = frappe.meta.get_docfield(frm.doctype, "payroll_year");
+		const month_df = frappe.meta.get_docfield(frm.doctype, "payroll_month_name");
+		if (year_df) {
+			year_df.default = String(now.getFullYear());
+		}
+		if (month_df) {
+			month_df.default = PAYROLL_MONTHS[now.getMonth()];
+		}
+	},
 	onload(frm) {
 		patch_payroll_file_attach_button(frm);
+		if (!frm.doc.payroll_sheet_type || frm.doc.payroll_sheet_type === "Auto Detect") {
+			frm.set_value("payroll_sheet_type", "Staff Payroll");
+		}
+		fill_company(frm);
+		fill_period(frm);
+	},
+	validate(frm) {
+		return fill_company(frm);
+	},
+	payroll_year(frm) {
+		write_payroll_month(frm);
+	},
+	payroll_month_name(frm) {
+		write_payroll_month(frm);
 	},
 	refresh(frm) {
 		patch_payroll_file_attach_button(frm);
-		const sheet_options = ["Auto Detect", "Staff Payroll", "Lumpsum"];
-		if (frm.doc.payroll_sheet_type === "Variable") {
-			sheet_options.push("Variable");
-		}
-		frm.set_df_property("payroll_sheet_type", "options", sheet_options.join("\n"));
+		fill_company(frm);
+		fill_period(frm);
 
 		if (frm.doc.docstatus !== 0 && !frm.is_new()) {
 			return;

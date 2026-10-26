@@ -24,8 +24,38 @@ from hrms.payroll.payroll_import.payroll_sheet_layout import (
 )
 
 
+PAYROLL_MONTHS = (
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+)
+
+
 class PayrollExcelUpload(Document):
-	pass
+	def validate(self):
+		if self.payroll_sheet_type not in ("Staff Payroll", "Lumpsum", "Variable"):
+			self.payroll_sheet_type = "Staff Payroll"
+		if not self.company:
+			self.company = frappe.defaults.get_user_default("Company") or frappe.db.get_value(
+				"Company", {}, "name"
+			)
+		if self.payroll_year and self.payroll_month_name in PAYROLL_MONTHS:
+			month_number = PAYROLL_MONTHS.index(self.payroll_month_name) + 1
+			self.payroll_month = f"{self.payroll_year}-{month_number:02d}-01"
+		month = normalize_payroll_month(self.payroll_month)
+		if month:
+			self.payroll_month = month
+			self.payroll_year = str(month.year)
+			self.payroll_month_name = PAYROLL_MONTHS[month.month - 1]
 
 
 @frappe.whitelist()
@@ -56,14 +86,10 @@ def import_payroll_excel(docname: str):
 		raise
 
 	detected_type = parsed.get("payroll_sheet_type") or "Staff Payroll"
-	if detected_type == "Variable" and (doc.payroll_sheet_type or "Auto Detect") == "Auto Detect":
-		frappe.throw(
-			_("Bonus and incentive files are imported on the Variable Dashboard, not on this form.")
-		)
 	log_lines: list[str] = []
-	if (doc.payroll_sheet_type or "Auto Detect") == "Auto Detect":
-		doc.payroll_sheet_type = detected_type
-	elif doc.payroll_sheet_type != detected_type:
+	if doc.payroll_sheet_type not in ("Staff Payroll", "Lumpsum", "Variable"):
+		frappe.throw(_("Select Payroll Sheet Type: Staff Payroll, Lumpsum, or Variable."))
+	if doc.payroll_sheet_type != detected_type:
 		log_lines.append(
 			_("Note: Excel looks like {0}; import uses selected type {1}.").format(
 				detected_type, doc.payroll_sheet_type

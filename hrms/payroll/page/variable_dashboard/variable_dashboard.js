@@ -13,6 +13,21 @@ frappe.pages["variable-dashboard"].on_page_load = function (wrapper) {
 };
 
 hrms.VariableDashboard = class VariableDashboard {
+	static MONTHS = [
+		"January",
+		"February",
+		"March",
+		"April",
+		"May",
+		"June",
+		"July",
+		"August",
+		"September",
+		"October",
+		"November",
+		"December",
+	];
+
 	constructor(page) {
 		this.page = page;
 		this.wrapper = $(page.body);
@@ -21,30 +36,23 @@ hrms.VariableDashboard = class VariableDashboard {
 	}
 
 	show() {
+		if (!$("#staff-payroll-dashboard-css").length) {
+			$(
+				'<link id="staff-payroll-dashboard-css" rel="stylesheet" href="/assets/hrms/css/staff_payroll_dashboard.css?v=20261026c">'
+			).appendTo("head");
+		}
 		this.wrapper.html(`
-			<style>
-				.variable-dashboard { padding: 4px 0 24px; }
-				.variable-dashboard .vd-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px; }
-				.variable-dashboard .vd-scroll { overflow-x: auto; }
-				.variable-dashboard table { width: max-content; min-width: 100%; border-collapse: collapse; }
-				.variable-dashboard th, .variable-dashboard td { border-bottom: 1px solid var(--border-color); padding: 8px; text-align: left; white-space: nowrap; }
-				.variable-dashboard th { font-size: 12px; color: var(--text-muted); }
-				.variable-dashboard tbody tr { cursor: pointer; }
-				.variable-dashboard tbody tr:hover { background: var(--fg-hover-color, #f4f5f6); }
-				.variable-dashboard .num { text-align: right; }
-				.variable-dashboard .vd-actions { text-align: right; }
-				.vd-detail { display: grid; grid-template-columns: 220px 1fr; gap: 6px 12px; }
-				.vd-detail span { color: var(--text-muted); }
-			</style>
-			<div class="variable-dashboard">
-				<div class="vd-toolbar">
+			<div class="staff-payroll-dashboard variable-dashboard">
+				<div class="toolbar-row">
 					<div class="filter-company"></div>
+					<div class="filter-year"></div>
 					<div class="filter-month"></div>
-					<div class="filter-type"></div>
-					<button class="btn btn-primary btn-sm btn-upload">${__("Upload Excel")}</button>
-					<button class="btn btn-default btn-sm btn-export">${__("Export Excel")}</button>
-					<button class="btn btn-default btn-sm btn-refresh">${__("Refresh")}</button>
-					<button class="btn btn-danger btn-sm btn-delete">${__("Delete")}</button>
+					<div class="filter-actions">
+						<button class="btn btn-primary btn-sm btn-upload">${__("Upload Excel")}</button>
+						<button class="btn btn-default btn-sm btn-export">${__("Export Excel")}</button>
+						<button class="btn btn-default btn-sm btn-refresh">${__("Refresh")}</button>
+						<button class="btn btn-danger btn-sm btn-delete">${__("Delete")}</button>
+					</div>
 				</div>
 				<div class="vd-host"></div>
 			</div>
@@ -60,147 +68,253 @@ hrms.VariableDashboard = class VariableDashboard {
 	make_filters() {
 		return frappe
 			.call({
-				method: "hrms.payroll.page.staff_payroll_dashboard.staff_payroll_dashboard.get_payroll_dashboard_companies",
+				method:
+					"hrms.payroll.page.staff_payroll_dashboard.staff_payroll_dashboard.get_payroll_dashboard_options",
 			})
 			.then((r) => {
-				const companies = r.message || [];
+				const options = r.message || {};
+				const companies = options.companies || [];
 				const company =
 					this.company && companies.includes(this.company) ? this.company : companies[0];
 				this.company_field = frappe.ui.form.make_control({
 					parent: this.wrapper.find(".filter-company")[0],
 					df: {
-						fieldtype: companies.length > 1 ? "Select" : "Data",
-						options: companies.join("\n"),
+						fieldtype: "Select",
+						options: (companies.length ? companies : [company].filter(Boolean)).join("\n"),
 						label: __("Company"),
 						fieldname: "company",
-						default: company,
 						read_only: companies.length <= 1 ? 1 : 0,
+					},
+					render_input: true,
+				});
+				const period = this.initial_period(options);
+				const years = period.years.length ? period.years : [String(period.year)];
+				this.year_field = frappe.ui.form.make_control({
+					parent: this.wrapper.find(".filter-year")[0],
+					df: {
+						fieldtype: "Select",
+						options: years.join("\n"),
+						label: __("Year"),
+						fieldname: "payroll_year",
 					},
 					render_input: true,
 				});
 				this.month_field = frappe.ui.form.make_control({
 					parent: this.wrapper.find(".filter-month")[0],
 					df: {
-						fieldtype: "Date",
-						label: __("Payroll Month"),
-						fieldname: "payroll_month",
-						default: this.payroll_month,
+						fieldtype: "Select",
+						options: hrms.VariableDashboard.MONTHS.join("\n"),
+						label: __("Month"),
+						fieldname: "payroll_month_name",
 					},
 					render_input: true,
 				});
-				this.type_field = frappe.ui.form.make_control({
-					parent: this.wrapper.find(".filter-type")[0],
-					df: {
-						fieldtype: "Select",
-						label: __("Bonus or Incentive"),
-						fieldname: "variable_type",
-						options: "\n",
-					},
-					render_input: true,
+				return Promise.all([
+					company ? this.company_field.set_value(company) : null,
+					this.year_field.set_value(String(period.year)),
+					this.month_field.set_value(hrms.VariableDashboard.MONTHS[period.month_index]),
+				]).then(() => {
+					if (company) {
+						this.company_field.value = company;
+						this.company_field.set_disp_area?.(company);
+					}
 				});
 			});
 	}
 
+	initial_period(options) {
+		const now = frappe.datetime.str_to_obj(frappe.datetime.nowdate());
+		const years = (options.years || []).map((year) => String(year));
+		const current_year = String(now.getFullYear());
+		if (!years.includes(current_year)) {
+			years.unshift(current_year);
+		}
+		const parts = String(options.latest_payroll_month || this.payroll_month || "").split("-");
+		let year = parts[0] || current_year;
+		let month_index = Math.max(0, parseInt(parts[1] || "1", 10) - 1);
+		if (!years.includes(year)) {
+			years.unshift(year);
+		}
+		if (Number.isNaN(month_index) || month_index > 11) {
+			month_index = now.getMonth();
+			year = current_year;
+		}
+		return { years, year, month_index };
+	}
+
+	get_payroll_month_value() {
+		const year = String(this.year_field?.get_value() || "").trim();
+		const month_name = this.month_field?.get_value();
+		const month_index = hrms.VariableDashboard.MONTHS.indexOf(month_name);
+		if (!year || month_index < 0) {
+			return null;
+		}
+		return `${year}-${String(month_index + 1).padStart(2, "0")}-01`;
+	}
+
 	load() {
+		const month = this.get_payroll_month_value();
+		if (!month) {
+			this.host.html(`<p class="text-muted">${__("Choose a payroll month.")}</p>`);
+			return;
+		}
 		frappe.call({
-			method: "hrms.payroll.page.variable_dashboard.variable_dashboard.get_variable_dashboard",
+			method:
+				"hrms.payroll.page.staff_payroll_dashboard.staff_payroll_dashboard.get_staff_payroll_dashboard",
 			args: {
-				variable_type: this.type_field?.get_value() || "",
-				payroll_month: this.month_field?.get_value() || "",
+				payroll_month: month,
 				company: this.company_field?.get_value() || "",
+				payroll_sheet_type: "Variable",
 			},
-			callback: (r) => this.render(r.message || {}),
+			callback: (r) => this.render_sheet(r.message || {}),
 		});
 	}
 
-	render(data) {
-		const types = data.types || [];
-		const current = this.type_field.get_value();
-		this.type_field.df.options = ["", ...types].join("\n");
-		this.type_field.refresh();
-		if (types.includes(current)) {
-			this.type_field.set_value(current);
-		}
-		const rows = data.rows || [];
-		this.rows = rows;
-		if (!rows.length) {
-			this.host.html(`<p class="text-muted">${__("No variable pay uploaded for this filter.")}</p>`);
+	render_sheet(data) {
+		const sheets = data.sheets?.length ? data.sheets : data.rows?.length ? [data] : [];
+		if (!sheets.length) {
+			const applied = data.filters_applied || {};
+			this.host.html(
+				`<div class="empty-state">${__(
+					"No submitted variable pay for {0}. Import Excel from Payroll Excel Upload, sheet type Variable.",
+					[applied.payroll_month || ""]
+				)}</div>`
+			);
 			return;
 		}
-		const money = (value) => format_currency(value || 0);
-		const body = rows
+		const applied = data.filters_applied || {};
+		const hint =
+			sheets.length > 1
+				? `<div class="sheet-filter-hint">${__(
+						"{0} variable pays in {1}. Each one is shown as its own sheet.",
+						[sheets.length, applied.payroll_month || ""]
+				  )}</div>`
+				: "";
+		this.host.html(`
+			${hint}
+			<div class="variable-sheet-stack">${sheets.map((sheet) => this.variable_sheet_block(sheet)).join("")}</div>
+		`);
+	}
+
+	variable_sheet_block(data) {
+		const rows_html = data.rows.map((row) => this.variable_data_row(row)).join("");
+		const footer = data.footer || {};
+		const logo_html = data.logo_url
+			? `<div class="sheet-logo-wrap"><img class="sheet-logo" src="${frappe.utils.escape_html(data.logo_url)}" alt="Company logo" /></div>`
+			: `<div class="sheet-logo-placeholder">${frappe.utils.escape_html(data.company_name || "")}</div>`;
+		const signatures_html = (footer.signatures || [])
+			.filter((sig) => sig && (sig.name || sig.title || sig.heading))
 			.map(
-				(row, index) => `<tr data-idx="${index}">
-					<td>${index + 1}</td>
-					<td>${frappe.utils.escape_html(row.employee_number || "")}</td>
-					<td>${frappe.utils.escape_html(row.employee_name || "")}</td>
-					<td>${frappe.datetime.str_to_user(row.date_of_joining) || ""}</td>
-					<td>${frappe.utils.escape_html(row.department || "")}</td>
-					<td>${frappe.utils.escape_html(row.position || "")}</td>
-					<td class="num">${money(row.basic_salary)}</td>
-					<td class="num">${money(row.gross_salary)}</td>
-					<td class="num">${money(row.paye)}</td>
-					<td class="num">${money(row.pension_employee)}</td>
-					<td class="num">${money(row.pension_employer)}</td>
-					<td class="num">${money(row.oh_employer)}</td>
-					<td class="num">${money(row.maternity_employee)}</td>
-					<td class="num">${money(row.maternity_employer)}</td>
-					<td class="num">${money(row.net_before_cbhi)}</td>
-					<td class="num">${money(row.cbhi)}</td>
-					<td class="num">${money(row.net_take_home)}</td>
-					<td>${frappe.utils.escape_html(row.account_number || "")}</td>
-					<td>${frappe.utils.escape_html(row.bank || "")}</td>
-					<td class="vd-actions"><button type="button" class="btn btn-danger btn-xs btn-delete-row" data-name="${frappe.utils.escape_html(row.name || "")}">${__("Delete")}</button></td>
-				</tr>`
+				(sig) => `<div class="signature-block">
+				<div class="sig-heading">${this.esc(sig.heading)}</div>
+				<div class="sig-name">${this.esc(sig.name)}</div>
+				<div class="sig-title">${this.esc(sig.title)}</div>
+			</div>`
 			)
 			.join("");
-		this.host.html(`
-			<div class="vd-scroll">
-			<table>
-				<thead>
-					<tr>
-						<th>${__("S/N")}</th>
-						<th>${__("ID NUMBER")}</th>
-						<th>${__("NAMES")}</th>
-						<th>${__("Date of Joining")}</th>
-						<th>${__("DEPARTMENT")}</th>
-						<th>${__("POSITION")}</th>
-						<th class="num">${__("Basic salary")}</th>
-						<th class="num">${__("Gross Salary")}</th>
-						<th class="num">${__("PAYE")}</th>
-						<th class="num">${__("Pension Employee 6%")}</th>
-						<th class="num">${__("Pension Employer 6%")}</th>
-						<th class="num">${__("OH Employer 2%")}</th>
-						<th class="num">${__("Maternity Employee 0.3%")}</th>
-						<th class="num">${__("Maternity Employer 0.3%")}</th>
-						<th class="num">${__("Net before CBHI")}</th>
-						<th class="num">${__("RSSB CBHI")}</th>
-						<th class="num">${__("Net Take-home Salary")}</th>
-						<th>${__("Account Number")}</th>
-						<th>${__("Beneficiary Bank")}</th>
-						<th></th>
-					</tr>
-				</thead>
-				<tbody>${body}</tbody>
-			</table>
+		return `
+			<div class="sheet-wrap">
+					<div class="sheet-brand-row">
+						${logo_html}
+						<div class="sheet-title">${frappe.utils.escape_html(data.title || "")}</div>
+					</div>
+					<table class="payroll-sheet">
+						<thead>
+							<tr>
+								<th rowspan="3">S/N</th>
+								<th rowspan="3">ID NUMBER</th>
+								<th rowspan="3">NAMES</th>
+								<th rowspan="3">Date of Joining</th>
+								<th rowspan="3">DEPARTMENT</th>
+								<th rowspan="3">POSITION</th>
+								<th rowspan="3">Basic salary</th>
+								<th rowspan="3">Gross Salary</th>
+								<th rowspan="3">PAYE(PAY AS YOU EARN)</th>
+								<th colspan="5" class="hdr-rssb">RSSB CONTRIBUTIONS</th>
+								<th rowspan="3">Net before CBHI</th>
+								<th rowspan="3">RSSB CBHI Scheme 0.5%</th>
+								<th rowspan="3" class="col-yellow">Net Take-home Salary</th>
+								<th rowspan="3">Account Number</th>
+								<th rowspan="3" class="col-green">Beneficiary Bank</th>
+							</tr>
+							<tr>
+								<th colspan="3" class="hdr-rssb-sub">PENSION SCHEME + OH</th>
+								<th colspan="2" class="hdr-rssb-sub">MATERNITY LEAVE BENEFITS</th>
+							</tr>
+							<tr>
+								<th class="hdr-rssb">Pension Employee 6%</th>
+								<th class="hdr-rssb">Pension Employer 6%</th>
+								<th class="hdr-rssb-sub">OH Employer 2%</th>
+								<th class="hdr-rssb-sub">Employee 0,3%</th>
+								<th class="hdr-rssb-sub">Employer 0,3%</th>
+							</tr>
+						</thead>
+						<tbody>${rows_html}</tbody>
+						<tfoot>${this.variable_total_row(data.totals, data.grand_total_label)}</tfoot>
+					</table>
+					<div class="sheet-footer">
+						<div class="sheet-date-line">${this.esc(footer.date_line || "")}</div>
+						<div class="sheet-signatures">${signatures_html}</div>
+					</div>
 			</div>
-		`);
-		this.host.find("tbody tr").on("click", (event) => {
-			if ($(event.target).closest(".btn-delete-row").length) {
-				return;
-			}
-			const row = this.rows[Number(event.currentTarget.dataset.idx)];
-			if (row) {
-				this.show_staff(row);
-			}
-		});
-		this.host.find(".btn-delete-row").on("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			const name = event.currentTarget.dataset.name;
-			const row = this.rows.find((item) => item.name === name);
-			this.delete_row(name, row);
-		});
+		`;
+	}
+
+	variable_data_row(row) {
+		const take_home = parseFloat(row.take_home) || parseFloat(row.net_salary) || 0;
+		return `<tr>
+			<td>${row.sn}</td>
+			<td>${this.esc(row.employee_id_number)}</td>
+			<td>${this.esc(row.employee_name)}</td>
+			<td>${this.esc(row.date_of_joining)}</td>
+			<td>${this.esc(row.department)}</td>
+			<td>${this.esc(row.position)}</td>
+			<td class="num">${this.fmt(row.basic_salary)}</td>
+			<td class="num">${this.fmt(row.gross_salary)}</td>
+			<td class="num">${this.fmt(row.paye)}</td>
+			<td class="num">${this.fmt(row.pension_employee)}</td>
+			<td class="num">${this.fmt(row.pension_employer)}</td>
+			<td class="num">${this.fmt(row.oh_employer)}</td>
+			<td class="num">${this.fmt(row.maternity_employee)}</td>
+			<td class="num">${this.fmt(row.maternity_employer)}</td>
+			<td class="num">${this.fmt(row.net_before_cbhi)}</td>
+			<td class="num">${this.fmt(row.cbhi)}</td>
+			<td class="num col-yellow">${this.fmt(take_home)}</td>
+			<td>${this.esc(row.account_number)}</td>
+			<td class="col-green">${this.esc(row.bank)}</td>
+		</tr>`;
+	}
+
+	variable_total_row(totals, label) {
+		totals = totals || {};
+		const take_home = parseFloat(totals.take_home) || parseFloat(totals.net_salary) || 0;
+		return `<tr class="grand-total">
+			<td colspan="6">${this.esc(label || __("GRAND TOTAL"))}</td>
+			<td class="num">${this.fmt(totals.basic_salary)}</td>
+			<td class="num">${this.fmt(totals.gross_salary)}</td>
+			<td class="num">${this.fmt(totals.paye)}</td>
+			<td class="num">${this.fmt(totals.pension_employee)}</td>
+			<td class="num">${this.fmt(totals.pension_employer)}</td>
+			<td class="num">${this.fmt(totals.oh_employer)}</td>
+			<td class="num">${this.fmt(totals.maternity_employee)}</td>
+			<td class="num">${this.fmt(totals.maternity_employer)}</td>
+			<td class="num">${this.fmt(totals.net_before_cbhi)}</td>
+			<td class="num">${this.fmt(totals.cbhi)}</td>
+			<td class="num col-yellow">${this.fmt(take_home)}</td>
+			<td colspan="2"></td>
+		</tr>`;
+	}
+
+	fmt(val) {
+		const n = parseFloat(val) || 0;
+		if (!n) {
+			return "-";
+		}
+		return frappe.format(n, { fieldtype: "Float", precision: 0 });
+	}
+
+	esc(val) {
+		return frappe.utils.escape_html(val == null ? "" : String(val));
 	}
 
 	delete_row(name, row) {
@@ -225,19 +339,15 @@ hrms.VariableDashboard = class VariableDashboard {
 	}
 
 	export_excel() {
-		const month = this.month_field?.get_value();
+		const month = this.get_payroll_month_value();
 		if (!month) {
 			frappe.msgprint(__("Choose the payroll month first."));
 			return;
 		}
 		const params = new URLSearchParams({ payroll_month: month });
 		const company = this.company_field?.get_value();
-		const variable_type = this.type_field?.get_value();
 		if (company) {
 			params.set("company", company);
-		}
-		if (variable_type) {
-			params.set("variable_type", variable_type);
 		}
 		window.open(
 			`/api/method/hrms.payroll.page.variable_dashboard.variable_dashboard.download_variable_excel?${params}`,
@@ -246,20 +356,21 @@ hrms.VariableDashboard = class VariableDashboard {
 	}
 
 	delete_filtered() {
-		const month = this.month_field?.get_value();
+		const month = this.get_payroll_month_value();
 		if (!month) {
 			frappe.msgprint(__("Choose the payroll month first."));
 			return;
 		}
-		const variable_type = this.type_field?.get_value() || "";
 		const company = this.company_field?.get_value() || "";
-		const scope = variable_type || __("all bonus and incentive types");
 		frappe.confirm(
-			__("Delete variable pay for {0}, {1}? This cannot be undone.", [company || __("this company"), scope]),
+			__("Delete variable pay for {0}, {1}? This cannot be undone.", [
+				company || __("this company"),
+				month,
+			]),
 			() => {
 				frappe.call({
 					method: "hrms.payroll.page.variable_dashboard.variable_dashboard.delete_variable_for_filters",
-					args: { payroll_month: month, company, variable_type },
+					args: { payroll_month: month, company },
 					freeze: true,
 					callback: (r) => {
 						frappe.show_alert({
@@ -310,7 +421,7 @@ hrms.VariableDashboard = class VariableDashboard {
 	}
 
 	upload() {
-		const month = this.month_field?.get_value();
+		const month = this.get_payroll_month_value();
 		const company = this.company_field?.get_value();
 		if (!month) {
 			frappe.msgprint(__("Choose the payroll month first."));

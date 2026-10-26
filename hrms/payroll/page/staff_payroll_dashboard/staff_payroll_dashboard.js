@@ -12,7 +12,7 @@ frappe.pages["staff-payroll-dashboard"].on_page_load = function (wrapper) {
 
 	if (!$("#staff-payroll-dashboard-css").length) {
 		$(
-			'<link id="staff-payroll-dashboard-css" rel="stylesheet" href="/assets/hrms/css/staff_payroll_dashboard.css">'
+			'<link id="staff-payroll-dashboard-css" rel="stylesheet" href="/assets/hrms/css/staff_payroll_dashboard.css?v=20261026c">'
 		).appendTo("head");
 	}
 
@@ -21,6 +21,21 @@ frappe.pages["staff-payroll-dashboard"].on_page_load = function (wrapper) {
 };
 
 hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
+	static MONTHS = [
+		"January",
+		"February",
+		"March",
+		"April",
+		"May",
+		"June",
+		"July",
+		"August",
+		"September",
+		"October",
+		"November",
+		"December",
+	];
+
 	constructor(page) {
 		this.page = page;
 		this.wrapper = $(page.body);
@@ -39,6 +54,7 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 			<div class="staff-payroll-dashboard">
 				<div class="toolbar-row">
 					<div class="filter-company"></div>
+					<div class="filter-year"></div>
 					<div class="filter-month"></div>
 					<div class="filter-sheet-type"></div>
 					<div class="filter-actions">
@@ -54,7 +70,7 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 
 		this.sheet_host = this.wrapper.find(".sheet-host");
 		this.wrapper.find(".btn-refresh").on("click", () => {
-			const month = this.read_payroll_month_from_field();
+			const month = this.get_payroll_month_value();
 			if (month) {
 				this._committed_payroll_month = month;
 			}
@@ -73,95 +89,112 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 		return frappe
 			.call({
 				method:
-					"hrms.payroll.page.staff_payroll_dashboard.staff_payroll_dashboard.get_payroll_dashboard_companies",
+					"hrms.payroll.page.staff_payroll_dashboard.staff_payroll_dashboard.get_payroll_dashboard_options",
 			})
 			.then((r) => {
-				const companies = r.message || [];
+				const options = r.message || {};
+				const companies = options.companies || [];
 				this.dashboard_companies = companies;
 				const default_company =
 					this.company && companies.includes(this.company)
 						? this.company
-						: companies[0] || this.company;
+						: companies[0] || this.company || "";
+				const period = this.initial_period(options);
+				const years = period.years.length ? period.years : [String(period.year)];
 				this.company_field = frappe.ui.form.make_control({
 					parent: this.wrapper.find(".filter-company")[0],
 					df: {
-						fieldtype: companies.length > 1 ? "Select" : "Data",
-						options: companies.join("\n"),
+						fieldtype: "Select",
+						options: (companies.length ? companies : [default_company].filter(Boolean)).join(
+							"\n"
+						),
 						label: __("Company"),
 						fieldname: "company",
-						default: default_company,
 						read_only: companies.length <= 1 ? 1 : 0,
-						onchange: () => this.schedule_filter_reload(),
+					},
+					render_input: true,
+				});
+				this.year_field = frappe.ui.form.make_control({
+					parent: this.wrapper.find(".filter-year")[0],
+					df: {
+						fieldtype: "Select",
+						options: years.join("\n"),
+						label: __("Year"),
+						fieldname: "payroll_year",
 					},
 					render_input: true,
 				});
 				this.month_field = frappe.ui.form.make_control({
 					parent: this.wrapper.find(".filter-month")[0],
 					df: {
-						fieldtype: "Date",
-						label: __("Payroll Month"),
-						description: __(
-							"Choose any day in the month, then click the day or press Refresh to load."
-						),
-						fieldname: "payroll_month",
-						default: this.payroll_month,
+						fieldtype: "Select",
+						options: hrms.StaffPayrollDashboard.MONTHS.join("\n"),
+						label: __("Month"),
+						fieldname: "payroll_month_name",
 					},
 					render_input: true,
 				});
-				this._committed_payroll_month = this.normalize_payroll_month(this.payroll_month);
 				this.sheet_type_field = frappe.ui.form.make_control({
 					parent: this.wrapper.find(".filter-sheet-type")[0],
 					df: {
 						fieldtype: "Select",
 						label: __("Sheet Type"),
 						fieldname: "payroll_sheet_type",
-						options: "Staff Payroll\nLumpsum\nAll",
+						options: "Staff Payroll\nLumpsum\nVariable\nAll",
 						default: "Staff Payroll",
-						onchange: () => this.schedule_filter_reload(),
 					},
 					render_input: true,
 				});
-				this.bind_month_field_reload();
+				this._committed_payroll_month = period.payroll_month;
+				return Promise.all([
+					default_company ? this.company_field.set_value(default_company) : null,
+					this.year_field.set_value(String(period.year)),
+					this.month_field.set_value(hrms.StaffPayrollDashboard.MONTHS[period.month_index]),
+					this.sheet_type_field.set_value("Staff Payroll"),
+				]).then(() => {
+					this.show_company_name(default_company);
+					const reload = () => this.schedule_filter_reload();
+					this.company_field.df.onchange = reload;
+					this.year_field.df.onchange = reload;
+					this.month_field.df.onchange = reload;
+					this.sheet_type_field.df.onchange = reload;
+				});
 			});
 	}
 
-	bind_month_field_reload() {
-		const capture_from_picker = (selectedDates) => {
-			if (selectedDates?.length) {
-				this._committed_payroll_month = this.normalize_payroll_month(selectedDates[0]);
-				this.schedule_filter_reload({ force: true });
-			}
-		};
-		const capture_from_input = () => {
-			const month = this.read_payroll_month_from_field();
-			if (month) {
-				this._committed_payroll_month = month;
-				this.schedule_filter_reload({ force: true });
-			}
-		};
-		const fp = this.month_field?.datepicker;
-		if (fp) {
-			const wrap = (handlers, fn) => {
-				const prev = handlers;
-				if (Array.isArray(prev)) {
-					prev.push(fn);
-					return prev;
-				}
-				return prev ? [prev, fn] : [fn];
-			};
-			fp.config.onChange = wrap(fp.config.onChange, capture_from_picker);
+	show_company_name(company) {
+		if (!company || !this.company_field) {
+			return;
 		}
-		this.month_field?.$input?.on("change blur", capture_from_input);
+		this.company_field.value = company;
+		if (this.company_field.set_disp_area) {
+			this.company_field.set_disp_area(company);
+		}
+		if (this.company_field.$input) {
+			this.company_field.$input.val(company);
+		}
 	}
 
-	read_payroll_month_from_field() {
-		const fp = this.month_field?.datepicker;
-		if (fp?.selectedDates?.length) {
-			return this.normalize_payroll_month(fp.selectedDates[0]);
+	initial_period(options) {
+		const now = frappe.datetime.str_to_obj(frappe.datetime.nowdate());
+		const years = (options.years || []).map((year) => String(year));
+		const current_year = String(now.getFullYear());
+		if (!years.includes(current_year)) {
+			years.unshift(current_year);
 		}
-		const raw =
-			(this.month_field?.$input?.val() || "").trim() || this.month_field?.get_value();
-		return this.normalize_payroll_month(raw);
+		let payroll_month = options.latest_payroll_month || this.payroll_month;
+		const parts = String(payroll_month || "").split("-");
+		let year = parts[0] || current_year;
+		let month_index = Math.max(0, parseInt(parts[1] || "1", 10) - 1);
+		if (!years.includes(year)) {
+			years.unshift(year);
+		}
+		if (Number.isNaN(month_index) || month_index > 11) {
+			month_index = now.getMonth();
+			year = current_year;
+		}
+		payroll_month = `${year}-${String(month_index + 1).padStart(2, "0")}-01`;
+		return { years, year, month_index, payroll_month };
 	}
 
 	schedule_filter_reload(options = {}) {
@@ -186,36 +219,45 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 		}, 150);
 	}
 
-	normalize_payroll_month(value) {
-		if (!value) {
-			return null;
-		}
-		if (value instanceof Date && !Number.isNaN(value.getTime())) {
-			const y = value.getFullYear();
-			const m = String(value.getMonth() + 1).padStart(2, "0");
-			return `${y}-${m}-01`;
-		}
-		if (typeof frappe.datetime.month_start === "function") {
-			const normalized = frappe.datetime.month_start(value);
-			if (normalized) {
-				return normalized;
-			}
-		}
-		const d = frappe.datetime.str_to_obj(value);
-		if (!d || Number.isNaN(d.getTime())) {
-			return null;
-		}
-		const y = d.getFullYear();
-		const m = String(d.getMonth() + 1).padStart(2, "0");
-		return `${y}-${m}-01`;
+	get_payroll_month_value() {
+		const year = String(this.year_field?.get_value() || "").trim();
+		const month_name = this.month_field?.get_value();
+		return this.compose_payroll_month(year, month_name) || this._committed_payroll_month || null;
 	}
 
-	get_payroll_month_value() {
-		return (
-			this._committed_payroll_month ||
-			this.read_payroll_month_from_field() ||
-			this.normalize_payroll_month(this.payroll_month)
-		);
+	year_choices(selected_year) {
+		const current = new Date().getFullYear();
+		const years = [];
+		for (let year = current - 2; year <= current + 1; year++) {
+			years.push(String(year));
+		}
+		if (selected_year && !years.includes(String(selected_year))) {
+			years.unshift(String(selected_year));
+		}
+		return years.join("\n");
+	}
+
+	split_payroll_month(value) {
+		const parts = String(value || "").split("-");
+		let year = parts[0];
+		let month_index = parseInt(parts[1] || "1", 10) - 1;
+		if (!year || month_index < 0 || month_index > 11) {
+			const now = frappe.datetime.str_to_obj(frappe.datetime.nowdate());
+			year = String(now.getFullYear());
+			month_index = now.getMonth();
+		}
+		return {
+			year: String(year),
+			month_name: hrms.StaffPayrollDashboard.MONTHS[month_index],
+		};
+	}
+
+	compose_payroll_month(year, month_name) {
+		const month_index = hrms.StaffPayrollDashboard.MONTHS.indexOf(month_name);
+		if (!year || month_index < 0) {
+			return "";
+		}
+		return `${year}-${String(month_index + 1).padStart(2, "0")}-01`;
 	}
 
 	get_filters() {
@@ -307,6 +349,10 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 	}
 
 	render_sheet(data) {
+		if (data.layout === "variable" || data.payroll_sheet_type === "Variable") {
+			this.render_variable_sheet(data);
+			return;
+		}
 		if (!data.rows || !data.rows.length) {
 			const applied = data.filters_applied || {};
 			const month = applied.payroll_month || "";
@@ -331,16 +377,7 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 		const grand_label =
 			data.grand_total_label ||
 			(data.month_label ? `GRAND TOTAL_${data.month_label}` : "GRAND TOTAL");
-		let totals_html = this.render_total_row(data.totals, grand_label);
-		if (data.prev_totals) {
-			totals_html += this.render_total_row(
-				data.prev_totals,
-				`GRAND TOTAL_${data.prev_month_label || ""}`
-			);
-		}
-		if (data.variance) {
-			totals_html += this.render_total_row(data.variance, "Variance", true);
-		}
+		const totals_html = this.render_total_row(data.totals, grand_label);
 		const { logo_html, footer, signatures_html, filter_hint_html } = this.build_sheet_chrome(data);
 
 		this.sheet_host.html(`
@@ -489,6 +526,125 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 		`);
 	}
 
+	render_variable_sheet(data) {
+		const sheets = data.sheets?.length ? data.sheets : data.rows?.length ? [data] : [];
+		if (!sheets.length) {
+			const applied = data.filters_applied || {};
+			this.sheet_host.html(
+				`<div class="empty-state">${__(
+					"No submitted payroll for {0} ({1}). Import Excel or choose another month.",
+					[applied.payroll_month || "", applied.payroll_sheet_type || "Variable"]
+				)}</div>`
+			);
+			return;
+		}
+		const { filter_hint_html } = this.build_sheet_chrome(data);
+		const blocks = sheets.map((sheet) => this.variable_sheet_block(sheet)).join("");
+		this.sheet_host.html(`
+			${filter_hint_html}
+			<div class="variable-sheet-stack">${blocks}</div>
+		`);
+	}
+
+	variable_sheet_block(data) {
+		const rows_html = data.rows.map((row) => this.render_variable_data_row(row)).join("");
+		const grand_label = data.grand_total_label || "GRAND TOTAL";
+		const totals_html = this.render_variable_total_row(data.totals, grand_label);
+		const { logo_html, footer, signatures_html } = this.build_sheet_chrome(data);
+
+		return `
+			<div class="sheet-wrap">
+				<div class="sheet-brand-row">
+					${logo_html}
+					<div class="sheet-title">${frappe.utils.escape_html(data.title || "")}</div>
+				</div>
+				<table class="payroll-sheet">
+					<thead>
+						<tr>
+							<th rowspan="3">S/N</th>
+							<th rowspan="3">ID NUMBER</th>
+							<th rowspan="3">NAMES</th>
+							<th rowspan="3">Date of Joining</th>
+							<th rowspan="3">DEPARTMENT</th>
+							<th rowspan="3">POSITION</th>
+							<th rowspan="3">Basic salary</th>
+							<th rowspan="3">Gross Salary</th>
+							<th rowspan="3">PAYE(PAY AS YOU EARN)</th>
+							<th colspan="5" class="hdr-rssb">RSSB CONTRIBUTIONS</th>
+							<th rowspan="3">Net before CBHI</th>
+							<th rowspan="3">RSSB CBHI Scheme 0.5%</th>
+							<th rowspan="3" class="col-yellow">Net Take-home Salary</th>
+							<th rowspan="3">Account Number</th>
+							<th rowspan="3" class="col-green">Beneficiary Bank</th>
+						</tr>
+						<tr>
+							<th colspan="3" class="hdr-rssb-sub">PENSION SCHEME + OH</th>
+							<th colspan="2" class="hdr-rssb-sub">MATERNITY LEAVE BENEFITS</th>
+						</tr>
+						<tr>
+							<th class="hdr-rssb">Pension Employee 6%</th>
+							<th class="hdr-rssb">Pension Employer 6%</th>
+							<th class="hdr-rssb-sub">OH Employer 2%</th>
+							<th class="hdr-rssb-sub">Employee 0,3%</th>
+							<th class="hdr-rssb-sub">Employer 0,3%</th>
+						</tr>
+					</thead>
+					<tbody>${rows_html}</tbody>
+					<tfoot>${totals_html}</tfoot>
+				</table>
+				<div class="sheet-footer">
+					<div class="sheet-date-line">${this.esc(footer.date_line || "")}</div>
+					<div class="sheet-signatures">${signatures_html}</div>
+				</div>
+			</div>
+		`;
+	}
+
+	render_variable_data_row(row) {
+		const take_home = flt(row.take_home) || flt(row.net_salary);
+		return `<tr>
+			<td>${row.sn}</td>
+			<td>${this.esc(row.employee_id_number)}</td>
+			<td>${this.esc(row.employee_name)}</td>
+			<td>${this.esc(row.date_of_joining)}</td>
+			<td>${this.esc(row.department)}</td>
+			<td>${this.esc(row.position)}</td>
+			<td class="num">${this.fmt(row.basic_salary)}</td>
+			<td class="num">${this.fmt(row.gross_salary)}</td>
+			<td class="num">${this.fmt(row.paye)}</td>
+			<td class="num hdr-rssb">${this.fmt(row.pension_employee)}</td>
+			<td class="num hdr-rssb">${this.fmt(row.pension_employer)}</td>
+			<td class="num hdr-rssb">${this.fmt(row.oh_employer)}</td>
+			<td class="num hdr-rssb">${this.fmt(row.maternity_employee)}</td>
+			<td class="num hdr-rssb">${this.fmt(row.maternity_employer)}</td>
+			<td class="num">${this.fmt(row.net_before_cbhi)}</td>
+			<td class="num">${this.fmt(row.cbhi)}</td>
+			<td class="num col-yellow">${this.fmt(take_home)}</td>
+			<td>${this.esc(row.account_number)}</td>
+			<td class="col-green">${this.esc(row.bank)}</td>
+		</tr>`;
+	}
+
+	render_variable_total_row(totals, label) {
+		totals = totals || {};
+		const take_home = flt(totals.take_home) || flt(totals.net_salary);
+		return `<tr class="grand-total">
+			<td colspan="6">${this.esc(label || __("GRAND TOTAL"))}</td>
+			<td class="num">${this.fmt(totals.basic_salary)}</td>
+			<td class="num">${this.fmt(totals.gross_salary)}</td>
+			<td class="num">${this.fmt(totals.paye)}</td>
+			<td class="num">${this.fmt(totals.pension_employee)}</td>
+			<td class="num">${this.fmt(totals.pension_employer)}</td>
+			<td class="num">${this.fmt(totals.oh_employer)}</td>
+			<td class="num">${this.fmt(totals.maternity_employee)}</td>
+			<td class="num">${this.fmt(totals.maternity_employer)}</td>
+			<td class="num">${this.fmt(totals.net_before_cbhi)}</td>
+			<td class="num">${this.fmt(totals.cbhi)}</td>
+			<td class="num col-yellow">${this.fmt(take_home)}</td>
+			<td colspan="2"></td>
+		</tr>`;
+	}
+
 	render_lumpsum_data_row(row) {
 		return `<tr>
 			<td>${row.sn}</td>
@@ -604,7 +760,9 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 	}
 
 	payslip_dialog() {
-		const payroll_month = this.month_field.get_value();
+		const period = this.split_payroll_month(this.get_payroll_month_value());
+		const years = this.year_choices(period.year);
+		const months = hrms.StaffPayrollDashboard.MONTHS.join("\n");
 		frappe.prompt(
 			[
 				{
@@ -614,37 +772,36 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 					reqd: 1,
 				},
 				{
-					fieldname: "mode",
+					fieldname: "payroll_year",
 					fieldtype: "Select",
-					label: __("Period"),
-					options: [
-						"Last 3 months",
-						"Single payroll month",
-						"From month – To month",
-					].join("\n"),
-					default: "Single payroll month",
+					label: __("Year"),
+					options: years,
+					default: period.year,
 					reqd: 1,
 				},
 				{
-					fieldname: "payroll_month",
-					fieldtype: "Date",
-					label: __("Payroll month"),
-					default: payroll_month,
-					depends_on: 'eval:doc.mode=="Single payroll month"',
+					fieldname: "payroll_month_name",
+					fieldtype: "Select",
+					label: __("Month"),
+					options: months,
+					default: period.month_name,
+					reqd: 1,
 				},
 				{
-					fieldname: "from_month",
-					fieldtype: "Date",
-					label: __("From month"),
-					default: payroll_month,
-					depends_on: 'eval:doc.mode=="From month – To month"',
+					fieldname: "to_year",
+					fieldtype: "Select",
+					label: __("To year"),
+					options: years,
+					default: period.year,
+					reqd: 1,
 				},
 				{
-					fieldname: "to_month",
-					fieldtype: "Date",
+					fieldname: "to_month_name",
+					fieldtype: "Select",
 					label: __("To month"),
-					default: payroll_month,
-					depends_on: 'eval:doc.mode=="From month – To month"',
+					options: months,
+					default: period.month_name,
+					reqd: 1,
 				},
 			],
 			(values) => {
@@ -652,25 +809,21 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 					.trim()
 					.replace(/\s+/g, " ")
 					.replace(/^(MSID)\s*(\d+)$/i, (_, p, n) => `${p.toUpperCase()} ${n}`);
+				const from_month = this.compose_payroll_month(values.payroll_year, values.payroll_month_name);
+				const to_month = this.compose_payroll_month(values.to_year, values.to_month_name);
+				if (!from_month || !to_month) {
+					frappe.msgprint(__("Year and Month are required."));
+					return;
+				}
+				if (from_month > to_month) {
+					frappe.msgprint(__("From month cannot be after To month."));
+					return;
+				}
 				const params = new URLSearchParams({
 					employee_id_number: employee_id,
+					from_month,
+					to_month,
 				});
-				if (values.mode === "Last 3 months") {
-					params.set("months", 3);
-				} else if (values.mode === "Single payroll month") {
-					if (!values.payroll_month) {
-						frappe.msgprint(__("Payroll month is required."));
-						return;
-					}
-					params.set("payroll_month", values.payroll_month);
-				} else {
-					if (!values.from_month || !values.to_month) {
-						frappe.msgprint(__("From month and To month are required."));
-						return;
-					}
-					params.set("from_month", values.from_month);
-					params.set("to_month", values.to_month);
-				}
 				window.location.href = frappe.urllib.get_full_url(
 					`/api/method/hrms.payroll.doctype.imported_payroll_record.imported_payroll_record.download_payslip_docx?${params}`
 				);

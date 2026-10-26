@@ -20,6 +20,18 @@ class ImportedPayrollRecord(Document):
 		if not self.currency:
 			self.currency = frappe.db.get_single_value("System Settings", "currency") or "RWF"
 
+	def after_delete(self):
+		_delete_upload_if_empty(self.payroll_excel_upload)
+
+
+def _delete_upload_if_empty(upload_name: str | None) -> None:
+	"""Remove the Excel upload once none of its payroll rows remain."""
+	if not upload_name or not frappe.db.exists("Payroll Excel Upload", upload_name):
+		return
+	if frappe.db.count("Imported Payroll Record", {"payroll_excel_upload": upload_name}):
+		return
+	frappe.delete_doc("Payroll Excel Upload", upload_name, force=1, ignore_permissions=True)
+
 
 def _send_payslip_docx_response(
 	employee_id_number: str,
@@ -92,9 +104,15 @@ def download_payroll_month_excel(
 		frappe.throw(_("Payroll Month is required."))
 
 	sheet_type = payroll_sheet_type if payroll_sheet_type not in ("All", "", None) else "Staff Payroll"
-	content = build_payroll_month_excel(month, company=company, payroll_sheet_type=sheet_type)
+	if sheet_type == "Variable":
+		from hrms.payroll.payroll_import.payroll_month_export import build_variable_month_excel
+
+		content = build_variable_month_excel(month, company=company)
+		prefix = "Variable_Pay"
+	else:
+		content = build_payroll_month_excel(month, company=company, payroll_sheet_type=sheet_type)
+		prefix = "Lumpsum_Payroll" if sheet_type == "Lumpsum" else "Staff_Payroll"
 	label = month.strftime("%Y-%m")
-	prefix = "Lumpsum_Payroll" if sheet_type == "Lumpsum" else "Staff_Payroll"
 	frappe.local.response.filename = f"{prefix}_{label}.xlsx"
 	frappe.local.response.filecontent = content
 	frappe.local.response.type = "download"

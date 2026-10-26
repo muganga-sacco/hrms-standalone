@@ -25,7 +25,7 @@ def run_lumpsum_import_test(file_path: str) -> dict:
 
 	doc = frappe.new_doc("Payroll Excel Upload")
 	doc.company = company
-	doc.payroll_sheet_type = "Auto Detect"
+	doc.payroll_sheet_type = "Lumpsum"
 	doc.flags.ignore_mandatory = True
 	doc.insert(ignore_permissions=True)
 

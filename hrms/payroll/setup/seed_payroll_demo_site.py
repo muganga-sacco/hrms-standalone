@@ -21,7 +21,7 @@ from hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload import impor
 from hrms.payroll.setup.create_payroll_test_users import create_payroll_test_users
 
 
-def _import_excel_file(file_path: str) -> dict:
+def _import_excel_file(file_path: str, payroll_sheet_type: str = "Staff Payroll") -> dict:
 	path = Path(file_path)
 	if not path.is_file():
 		frappe.throw(f"File not found: {file_path}")
@@ -36,7 +36,7 @@ def _import_excel_file(file_path: str) -> dict:
 
 	doc = frappe.new_doc("Payroll Excel Upload")
 	doc.company = company
-	doc.payroll_sheet_type = "Auto Detect"
+	doc.payroll_sheet_type = payroll_sheet_type
 	doc.flags.ignore_mandatory = True
 	doc.insert(ignore_permissions=True)
 
@@ -70,7 +70,7 @@ def seed_payroll_demo_site(
 	if staff_excel_path:
 		out["imports"]["staff"] = _import_excel_file(staff_excel_path)
 	if lumpsum_excel_path:
-		out["imports"]["lumpsum"] = _import_excel_file(lumpsum_excel_path)
+		out["imports"]["lumpsum"] = _import_excel_file(lumpsum_excel_path, "Lumpsum")
 
 	out["row_counts"]["total_submitted"] = frappe.db.count("Imported Payroll Record", {"docstatus": 1})
 	out["users"] = create_payroll_test_users(password)

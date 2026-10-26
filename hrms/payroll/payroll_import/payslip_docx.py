@@ -123,6 +123,7 @@ PAYSLIP_FIELDS = [
 	"other_deductions",
 	"total_deductions",
 	"net_salary",
+	"net_paid",
 	"take_home",
 	"account_number",
 	"bank",
@@ -136,6 +137,7 @@ PAYSLIP_TABLE_COLS_WITH_ICT = 17
 PAYSLIP_TABLE_COLS_WITHOUT_ICT = 16
 BONUS_COLUMN_WIDTH = 1600
 ALLOWANCE_COLUMN_WIDTH = 1154
+TRANSPORT_COLUMN_WIDTH = 2200
 
 
 def get_payroll_records_for_payslip(
@@ -370,12 +372,9 @@ def _merge_staff_and_lumpsum(staff: dict | None, lumpsum: dict | None, month_key
 	merged["gross_variable"] = 0.0
 	merged["variable_labels"] = []
 	merged["gross_salary"] = merged["gross_staff"] + merged["gross_lumpsum"]
-	staff_net = _flt(staff.get("net_salary")) if staff else 0.0
-	lumpsum_net = _flt(lumpsum.get("net_salary")) if lumpsum else 0.0
-	merged["net_salary_staff"] = staff_net
-	merged["net_salary_lumpsum"] = lumpsum_net
-	merged["net_salary"] = staff_net + lumpsum_net
-	merged["take_home"] = merged["net_salary"]
+	merged["net_salary_staff"] = _sheet_net_paid(staff) if staff else 0.0
+	merged["net_salary_lumpsum"] = _sheet_net_paid(lumpsum) if lumpsum else 0.0
+	_set_payslip_net_from_paid(merged)
 	merged["payroll_period_label"] = _payslip_pay_period_label(merged, month_key)
 	return merged
 
@@ -391,9 +390,8 @@ def _apply_staff_record_to_merged(target: dict, record: dict) -> None:
 	target["maternity_employee"] += _flt(record.get("maternity_employee"))
 	target["maternity_employer"] += _flt(record.get("maternity_employer"))
 	target["cbhi"] += _flt(record.get("cbhi"))
-	target["rpf"] = _flt(record.get("rpf"))
-	target["insurance_sanlam"] = _flt(record.get("insurance_sanlam"))
-	target["insurance_prime"] = _flt(record.get("insurance_prime"))
+	_add_other_deductions(target, record)
+	_add_net_paid(target, record)
 	for field in (
 		"employee_name",
 		"position",
@@ -427,15 +425,14 @@ def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> No
 		target["itc_allowance"] += _flt(record.get("itc_allowance"))
 		target["ict_allowance"] += _flt(record.get("ict_allowance"))
 		gross_variable += _flt(record.get("gross_salary"))
-		variable_net += _flt(record.get("net_salary")) or _flt(record.get("take_home"))
+		variable_net += _sheet_net_paid(record)
 		target["paye"] += _flt(record.get("paye"))
 		target["pension_employee"] += _flt(record.get("pension_employee"))
 		target["maternity_employee"] += _flt(record.get("maternity_employee"))
 		target["maternity_employer"] += _flt(record.get("maternity_employer"))
 		target["cbhi"] += _flt(record.get("cbhi"))
-		target["rpf"] += _flt(record.get("rpf"))
-		target["insurance_sanlam"] += _flt(record.get("insurance_sanlam"))
-		target["insurance_prime"] += _flt(record.get("insurance_prime"))
+		_add_other_deductions(target, record)
+		_add_net_paid(target, record)
 		label = (record.get("payroll_period_label") or "Variable").strip()
 		if label and label not in labels:
 			labels.append(label)
@@ -453,8 +450,8 @@ def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> No
 	target["bonus_incentives"] = bonus_incentives
 	target["variable_labels"] = labels
 	target["gross_salary"] = _flt(target.get("gross_staff")) + _flt(target.get("gross_lumpsum")) + gross_variable
-	target["net_salary"] = _flt(target.get("net_salary")) + variable_net
-	target["take_home"] = target["net_salary"]
+	_set_payslip_net_from_paid(target)
+	target["net_salary_variable"] = variable_net
 
 
 def _apply_lumpsum_record_to_merged(target: dict, record: dict) -> None:
@@ -464,6 +461,8 @@ def _apply_lumpsum_record_to_merged(target: dict, record: dict) -> None:
 	target["maternity_employee"] += _flt(record.get("maternity_employee"))
 	target["maternity_employer"] += _flt(record.get("maternity_employer"))
 	target["cbhi"] += _flt(record.get("cbhi"))
+	_add_other_deductions(target, record)
+	_add_net_paid(target, record)
 	for field in (
 		"employee_name",
 		"position",
@@ -587,12 +586,60 @@ def _new_merged_payslip_row(seed: dict, month_key: str) -> dict:
 		"maternity_employee": 0.0,
 		"maternity_employer": 0.0,
 		"cbhi": 0.0,
+		"muganga_sacco_social_fund": 0.0,
 		"rpf": 0.0,
+		"brd_loan": 0.0,
+		"sport_subscription": 0.0,
 		"insurance_sanlam": 0.0,
 		"insurance_prime": 0.0,
 		"net_salary": 0.0,
+		"net_paid": 0.0,
 		"take_home": 0.0,
 	}
+
+
+OTHER_DEDUCTION_FIELDS = (
+	"muganga_sacco_social_fund",
+	"rpf",
+	"brd_loan",
+	"sport_subscription",
+	"insurance_sanlam",
+	"insurance_prime",
+)
+
+
+def _other_deductions_amount(record: dict | None) -> float:
+	"""Social fund, RPF, loan, sport, and insurance on one payroll sheet."""
+	if not record:
+		return 0.0
+	parts = sum(_flt(record.get(field)) for field in OTHER_DEDUCTION_FIELDS)
+	if parts:
+		return parts
+	return _flt(record.get("other_deductions"))
+
+
+def _sheet_net_paid(record: dict | None) -> float:
+	"""Net paid is take-home after other deductions. Sheets without that column use their net."""
+	if not record:
+		return 0.0
+	paid = _flt(record.get("net_paid"))
+	if paid:
+		return paid
+	return _flt(record.get("net_salary")) or _flt(record.get("take_home"))
+
+
+def _add_other_deductions(target: dict, record: dict) -> None:
+	for field in OTHER_DEDUCTION_FIELDS:
+		target[field] = _flt(target.get(field)) + _flt(record.get(field))
+
+
+def _add_net_paid(target: dict, record: dict) -> None:
+	target["net_paid"] = _flt(target.get("net_paid")) + _sheet_net_paid(record)
+
+
+def _set_payslip_net_from_paid(target: dict) -> None:
+	target["net_salary"] = _flt(target.get("net_paid"))
+	target["take_home"] = target["net_salary"]
 
 
 def _payslip_period_hint(
@@ -775,7 +822,7 @@ def _prepare_payslip_earning_columns(table, include_ict: bool) -> int:
 	ICT Allowance is kept only when a payslip row has an ICT amount.
 	Bonus and other Incentives follows those allowance columns.
 	"""
-	_insert_column_after(table, 2, "Transport", ALLOWANCE_COLUMN_WIDTH)
+	_insert_column_after(table, 2, "Transport allowance", TRANSPORT_COLUMN_WIDTH)
 	_insert_column_after(table, 3, "TC Allowance", ALLOWANCE_COLUMN_WIDTH)
 	if include_ict:
 		bonus_after = 5
@@ -962,15 +1009,9 @@ def _record_to_table_row(record: dict, include_ict: bool = False) -> list[str]:
 
 	gross_lumpsum = _flt(record.get("gross_lumpsum"))
 	maternity = _flt(record.get("maternity_employee")) + _flt(record.get("maternity_employer"))
-	other_deductions = (
-		_flt(record.get("rpf"))
-		+ _flt(record.get("insurance_sanlam"))
-		+ _flt(record.get("insurance_prime"))
-	)
+	other_deductions = _other_deductions_amount(record)
 	gross_salary = _flt(record.get("gross_salary"))
-	net = _flt(record.get("net_salary"))
-	if not net:
-		net = _flt(record.get("take_home"))
+	net = _sheet_net_paid(record)
 	total_deductions = gross_salary - net if gross_salary and net else 0.0
 
 	values = [

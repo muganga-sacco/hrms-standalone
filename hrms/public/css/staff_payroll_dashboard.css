@@ -5,9 +5,55 @@
 .staff-payroll-dashboard .toolbar-row {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 12px;
 	align-items: flex-end;
+	gap: 12px 16px;
 	margin-bottom: 1rem;
+}
+
+.staff-payroll-dashboard .toolbar-row .frappe-control,
+.staff-payroll-dashboard .toolbar-row .form-group {
+	margin-bottom: 0;
+}
+
+.staff-payroll-dashboard .toolbar-row .help-box {
+	display: none;
+}
+
+.staff-payroll-dashboard .filter-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin: 0;
+}
+
+.staff-payroll-dashboard .filter-actions .btn {
+	margin: 0;
+	height: 28px;
+	display: inline-flex;
+	align-items: center;
+}
+
+.staff-payroll-dashboard .filter-company {
+	min-width: 220px;
+}
+
+.staff-payroll-dashboard .filter-company .control-value,
+.staff-payroll-dashboard .filter-company .like-disabled-input {
+	min-width: 180px;
+	min-height: 28px;
+	color: var(--text-color);
+}
+
+.staff-payroll-dashboard .filter-year,
+.staff-payroll-dashboard .filter-month {
+	min-width: 140px;
+}
+
+.staff-payroll-dashboard .variable-sheet-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 1.5rem;
 }
 
 .staff-payroll-dashboard .sheet-wrap {
@@ -115,10 +161,6 @@
 .staff-payroll-dashboard tr.grand-total td {
 	font-weight: 700;
 	background: #fde9d9;
-}
-
-.staff-payroll-dashboard tr.variance-row td {
-	color: #c0392b;
 }
 
 .staff-payroll-dashboard td.num {

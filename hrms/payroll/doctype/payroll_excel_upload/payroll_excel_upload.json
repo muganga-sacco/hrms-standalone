@@ -9,6 +9,8 @@
   "company",
   "payroll_sheet_type",
   "payroll_period_label",
+  "payroll_year",
+  "payroll_month_name",
   "payroll_month",
   "column_break_1",
   "status",
@@ -27,15 +29,16 @@
    "fieldtype": "Link",
    "label": "Company",
    "options": "Company",
+   "read_only": 1,
    "reqd": 1
   },
   {
-   "default": "Auto Detect",
+   "default": "Staff Payroll",
    "fieldname": "payroll_sheet_type",
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Payroll Sheet Type",
-   "options": "Auto Detect\nStaff Payroll\nLumpsum\nVariable"
+   "options": "Staff Payroll\nLumpsum\nVariable"
   },
   {
    "fieldname": "payroll_period_label",
@@ -44,9 +47,21 @@
    "read_only": 1
   },
   {
-   "description": "Pick the month for this import (use the 1st or any day in that month). Required when the Excel title does not include a month.",
+   "fieldname": "payroll_year",
+   "fieldtype": "Select",
+   "label": "Year",
+   "options": "2024\n2025\n2026\n2027\n2028"
+  },
+  {
+   "fieldname": "payroll_month_name",
+   "fieldtype": "Select",
+   "label": "Month",
+   "options": "January\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember"
+  },
+  {
    "fieldname": "payroll_month",
    "fieldtype": "Date",
+   "hidden": 1,
    "label": "Payroll Month"
   },
   {

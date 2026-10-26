@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import add_months, flt, getdate
+from frappe.utils import flt, getdate
 
 from hrms.payroll.payroll_import.payroll_access import (
 	throw_if_not_hr_payroll,
@@ -28,6 +28,20 @@ LUMPSUM_NUMERIC_FIELDS = [
 	"pension_employee",
 	"pension_employer",
 	"net_salary",
+]
+
+VARIABLE_NUMERIC_FIELDS = [
+	"basic_salary",
+	"gross_salary",
+	"paye",
+	"pension_employee",
+	"pension_employer",
+	"oh_employer",
+	"maternity_employee",
+	"maternity_employer",
+	"net_before_cbhi",
+	"cbhi",
+	"take_home",
 ]
 
 NUMERIC_FIELDS = [
@@ -75,6 +89,157 @@ def get_payroll_dashboard_companies() -> list[str]:
 		if default:
 			companies = [default]
 	return companies
+
+
+@frappe.whitelist()
+def get_payroll_dashboard_options() -> dict:
+	"""Company name plus the years that already have an uploaded payroll."""
+	throw_if_not_payroll_dashboard_viewer()
+	companies = get_payroll_dashboard_companies()
+	latest = frappe.db.sql(
+		"""
+		SELECT MAX(payroll_month)
+		FROM `tabImported Payroll Record`
+		WHERE docstatus = 1 AND payroll_month IS NOT NULL
+		"""
+	)[0][0]
+	years = frappe.db.sql(
+		"""
+		SELECT DISTINCT YEAR(payroll_month)
+		FROM `tabImported Payroll Record`
+		WHERE docstatus = 1 AND payroll_month IS NOT NULL
+		""",
+		pluck=True,
+	)
+	year_set = {int(year) for year in years if year}
+	year_set.add(getdate().year)
+	latest_iso = None
+	if latest:
+		latest_date = getdate(latest)
+		latest_iso = latest_date.isoformat()
+		year_set.add(latest_date.year)
+	return {
+		"companies": companies,
+		"years": sorted(year_set, reverse=True),
+		"latest_payroll_month": latest_iso,
+	}
+
+
+def _variable_group_key(record: dict) -> str:
+	upload = (record.get("payroll_excel_upload") or "").strip()
+	if upload:
+		return f"upload:{upload}"
+	label = (record.get("payroll_period_label") or "").strip()
+	return f"label:{label or 'Variable'}"
+
+
+def _variable_month_response(records: list[dict], month, company: str | None, requested_month: str) -> dict:
+	"""One sheet per bonus or incentive uploaded in the month."""
+	groups: dict[str, list[dict]] = {}
+	for record in records:
+		groups.setdefault(_variable_group_key(record), []).append(record)
+
+	sheets = []
+	for group_records in groups.values():
+		sheets.append(_one_variable_sheet(group_records, month, company))
+
+	return {
+		"layout": "variable",
+		"payroll_sheet_type": "Variable",
+		"filters_applied": {
+			"payroll_month": month.isoformat(),
+			"payroll_sheet_type": "Variable",
+			"company": company,
+			"requested_payroll_month": normalize_payroll_month(requested_month).isoformat()
+			if normalize_payroll_month(requested_month)
+			else requested_month,
+		},
+		"payroll_month": month.isoformat(),
+		"month_label": month.strftime("%B").upper(),
+		"sheets": sheets,
+		"rows": [],
+		"count": sum(sheet["count"] for sheet in sheets),
+	}
+
+
+def _one_variable_sheet(records: list[dict], month, company: str | None) -> dict:
+	rows = []
+	for idx, record in enumerate(records, start=1):
+		staff_row = _staff_payroll_row_for_employee(record.get("employee_id_number"), month)
+		row = {"sn": idx}
+		for field in ROW_FIELDS:
+			val = record.get(field)
+			if staff_row:
+				if field == "date_of_joining" and not val:
+					val = staff_row.get("date_of_joining")
+				elif field == "department" and staff_row.get("department"):
+					val = staff_row.get("department")
+				elif field == "position" and not val and staff_row.get("position"):
+					val = staff_row.get("position")
+			if field == "date_of_joining":
+				val = val or _employee_date_of_joining(record)
+			if field == "date_of_joining" and val:
+				val = getdate(val).strftime("%d-%m-%Y")
+			elif field in NUMERIC_FIELDS:
+				val = flt(val)
+			row[field] = val
+		if not flt(row.get("take_home")):
+			row["take_home"] = flt(record.get("net_salary"))
+		rows.append(row)
+
+	totals = {field: 0.0 for field in VARIABLE_NUMERIC_FIELDS}
+	for record in records:
+		for field in VARIABLE_NUMERIC_FIELDS:
+			totals[field] += flt(record.get(field))
+	if not totals["take_home"]:
+		totals["take_home"] = sum(flt(row.get("take_home")) for row in rows)
+
+	title_label = (records[0].get("payroll_period_label") or "").strip() or month.strftime("%B %Y")
+	payroll_excel_upload = records[0].get("payroll_excel_upload")
+	ensure_payroll_sheet_layout(payroll_excel_upload, allow_sync=False)
+	header = get_payroll_sheet_header(
+		company, title_label, payroll_excel_upload, payroll_sheet_type="Variable"
+	)
+	banner = _lumpsum_sheet_banner(payroll_excel_upload, records, title_label)
+	if banner:
+		header["title"] = banner
+	footer = get_payroll_sheet_footer(
+		company,
+		payroll_month=month,
+		payroll_excel_upload=payroll_excel_upload,
+		payroll_sheet_type="Variable",
+	)
+	if not (footer.get("signatures") or []) and company:
+		staff_upload = get_payroll_excel_upload_for_month(company, month, "Staff Payroll")
+		if staff_upload and staff_upload != payroll_excel_upload:
+			staff_footer = get_payroll_sheet_footer(
+				company, payroll_month=month, payroll_excel_upload=staff_upload
+			)
+			if staff_footer.get("signatures"):
+				footer = staff_footer
+	if payroll_excel_upload and company and not header.get("logo_url"):
+		staff_upload = get_payroll_excel_upload_for_month(company, month, "Staff Payroll")
+		if staff_upload and staff_upload != payroll_excel_upload:
+			header["logo_url"] = get_payroll_sheet_header(
+				company, title_label, staff_upload, payroll_sheet_type="Variable"
+			).get("logo_url")
+			header["logo_missing"] = not bool(header.get("logo_url"))
+
+	return {
+		**header,
+		"payroll_excel_upload": payroll_excel_upload,
+		"payroll_period_label": title_label,
+		"grand_total_label": f"GRAND TOTAL_{month.strftime('%B').upper()} {month.year}",
+		"rows": rows,
+		"totals": totals,
+		"count": len(rows),
+		"footer": footer,
+		"filters_applied": {
+			"payroll_month": month.isoformat(),
+			"payroll_sheet_type": "Variable",
+			"company": company,
+		},
+	}
 
 
 def _employee_date_of_joining(record: dict):
@@ -149,8 +314,6 @@ def get_staff_payroll_dashboard(
 	filters: dict = {"docstatus": 1, "payroll_month": month}
 	if company:
 		filters["company"] = company
-	if payroll_sheet_type == "Variable":
-		payroll_sheet_type = "Staff Payroll"
 	effective_sheet_type = payroll_sheet_type if payroll_sheet_type not in ("All", "", None) else "Staff Payroll"
 	if payroll_sheet_type and payroll_sheet_type not in ("All", ""):
 		filters["payroll_sheet_type"] = payroll_sheet_type
@@ -162,16 +325,18 @@ def get_staff_payroll_dashboard(
 		filters=filters,
 		fields=ROW_FIELDS
 		+ ["payroll_period_label", "currency", "payroll_excel_upload", "company", "employee"],
-		order_by="employee_id_number asc",
+		order_by="payroll_period_label asc, employee_id_number asc",
 	)
 
 	effective_company = company or (records[0].get("company") if records else None)
+	if effective_sheet_type == "Variable":
+		return _variable_month_response(records, month, effective_company, payroll_month)
 
 	rows = []
 	for idx, record in enumerate(records, start=1):
 		staff_row = (
 			_staff_payroll_row_for_employee(record.get("employee_id_number"), month)
-			if effective_sheet_type == "Lumpsum"
+			if effective_sheet_type in ("Lumpsum", "Variable")
 			else None
 		)
 		row = {"sn": idx}
@@ -191,9 +356,16 @@ def get_staff_payroll_dashboard(
 			elif field in NUMERIC_FIELDS:
 				val = flt(val)
 			row[field] = val
+		if effective_sheet_type == "Variable" and not flt(row.get("take_home")):
+			row["take_home"] = flt(record.get("net_salary"))
 		rows.append(row)
 
-	total_fields = LUMPSUM_NUMERIC_FIELDS if effective_sheet_type == "Lumpsum" else NUMERIC_FIELDS
+	if effective_sheet_type == "Lumpsum":
+		total_fields = LUMPSUM_NUMERIC_FIELDS
+	elif effective_sheet_type == "Variable":
+		total_fields = VARIABLE_NUMERIC_FIELDS
+	else:
+		total_fields = NUMERIC_FIELDS
 	totals = {field: 0.0 for field in total_fields}
 	for record in records:
 		for field in total_fields:
@@ -206,19 +378,6 @@ def get_staff_payroll_dashboard(
 	if not currency and effective_company:
 		currency = frappe.db.get_value("Company", effective_company, "default_currency")
 
-	prev_month = getdate(add_months(month, -1))
-	prev_filters = {**filters, "payroll_month": prev_month}
-	prev_records = frappe.get_all(
-		"Imported Payroll Record",
-		filters=prev_filters,
-		fields=total_fields,
-	)
-	prev_totals = {field: 0.0 for field in total_fields}
-	for record in prev_records:
-		for field in total_fields:
-			prev_totals[field] += flt(record.get(field))
-	variance = {field: totals[field] - prev_totals.get(field, 0) for field in total_fields}
-
 	payroll_excel_upload = (
 		records[0].get("payroll_excel_upload")
 		if records
@@ -228,7 +387,7 @@ def get_staff_payroll_dashboard(
 	header = get_payroll_sheet_header(
 		effective_company, title_label, payroll_excel_upload, payroll_sheet_type=effective_sheet_type
 	)
-	if effective_sheet_type == "Lumpsum":
+	if effective_sheet_type in ("Lumpsum", "Variable"):
 		banner = _lumpsum_sheet_banner(payroll_excel_upload, records, title_label)
 		if banner:
 			header["title"] = banner
@@ -268,7 +427,12 @@ def get_staff_payroll_dashboard(
 				).get("logo_url")
 				header["logo_missing"] = not bool(header.get("logo_url"))
 
-	layout = "lumpsum" if effective_sheet_type == "Lumpsum" else "staff_payroll"
+	if effective_sheet_type == "Lumpsum":
+		layout = "lumpsum"
+	elif effective_sheet_type == "Variable":
+		layout = "variable"
+	else:
+		layout = "staff_payroll"
 	grand_total_label = f"GRAND TOTAL_{month.strftime('%B').upper()} {month.year}"
 	return {
 		**header,
@@ -285,12 +449,9 @@ def get_staff_payroll_dashboard(
 		"payroll_month": month.isoformat(),
 		"month_label": month.strftime("%B").upper(),
 		"grand_total_label": grand_total_label,
-		"prev_month_label": prev_month.strftime("%B").upper(),
 		"currency": currency or "RWF",
 		"rows": rows,
 		"totals": totals,
-		"prev_totals": prev_totals if prev_records else None,
-		"variance": variance if prev_records else None,
 		"count": len(rows),
 		"footer": footer,
 	}

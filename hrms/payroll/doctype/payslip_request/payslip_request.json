@@ -17,8 +17,12 @@
   "section_break_period",
   "period_type",
   "months",
+  "payroll_year",
+  "payroll_month_name",
   "payroll_month",
   "from_month",
+  "to_year",
+  "to_month_name",
   "to_month",
   "section_break_hr",
   "rejection_reason",
@@ -90,9 +94,10 @@
    "label": "Payslip Period"
   },
   {
-   "default": "Single payroll month",
+   "default": "From month \u2013 To month",
    "fieldname": "period_type",
    "fieldtype": "Select",
+   "hidden": 1,
    "label": "Period Type",
    "options": "Last 3 months\nSingle payroll month\nFrom month \u2013 To month",
    "reqd": 1
@@ -105,21 +110,45 @@
    "label": "Number of Months"
   },
   {
-   "depends_on": "eval:doc.period_type==\"Single payroll month\"",
+   "fieldname": "payroll_year",
+   "fieldtype": "Select",
+   "label": "Year",
+   "options": "2024\n2025\n2026\n2027\n2028"
+  },
+  {
+   "fieldname": "payroll_month_name",
+   "fieldtype": "Select",
+   "label": "Month",
+   "options": "January\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember"
+  },
+  {
    "fieldname": "payroll_month",
    "fieldtype": "Date",
+   "hidden": 1,
    "label": "Payroll Month"
   },
   {
-   "depends_on": "eval:doc.period_type==\"From month \u2013 To month\"",
    "fieldname": "from_month",
    "fieldtype": "Date",
+   "hidden": 1,
    "label": "From Month"
   },
   {
-   "depends_on": "eval:doc.period_type==\"From month \u2013 To month\"",
+   "fieldname": "to_year",
+   "fieldtype": "Select",
+   "label": "To Year",
+   "options": "2024\n2025\n2026\n2027\n2028"
+  },
+  {
+   "fieldname": "to_month_name",
+   "fieldtype": "Select",
+   "label": "To Month",
+   "options": "January\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember"
+  },
+  {
    "fieldname": "to_month",
    "fieldtype": "Date",
+   "hidden": 1,
    "label": "To Month"
   },
   {
