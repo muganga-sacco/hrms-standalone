@@ -90,6 +90,256 @@ def _inject_payslip_logo(doc, record: dict) -> None:
 		frappe.log_error(title="Payslip logo")
 
 
+def _site_file_path(path: str | None) -> str | None:
+	if not path:
+		return None
+	if os.path.isabs(path) and os.path.exists(path):
+		return path
+	rooted = os.path.abspath(os.path.join(frappe.utils.get_bench_path(), "sites", str(path).lstrip("./")))
+	if os.path.exists(rooted):
+		return rooted
+	if os.path.exists(path):
+		return os.path.abspath(path)
+	return None
+
+
+def _employee_photo_path(record: dict, employee_id_number: str | None = None) -> str | None:
+	"""Photo stored on the Employee, or on the linked User when the employee image is empty."""
+	from hrms.payroll.payroll_import.payroll_employee_link import find_employee_for_payroll_id
+	from hrms.payroll.payroll_import.payroll_signoff import signature_image_path
+
+	employee = (record.get("employee") or "").strip()
+	if employee and not frappe.db.exists("Employee", employee):
+		employee = ""
+	if not employee:
+		employee = (
+			find_employee_for_payroll_id(record.get("employee_id_number") or employee_id_number) or ""
+		)
+	if not employee:
+		return None
+
+	image = frappe.db.get_value("Employee", employee, "image")
+	if not image:
+		user_id = frappe.db.get_value("Employee", employee, "user_id")
+		if user_id:
+			image = frappe.db.get_value("User", user_id, "user_image")
+	return _site_file_path(signature_image_path(image))
+
+
+def _payslip_logo_path(record: dict) -> str | None:
+	from hrms.payroll.payroll_import.payroll_sheet_layout import (
+		get_company_logo_path,
+		get_payroll_excel_upload_for_month,
+	)
+
+	company = record.get("company")
+	payroll_excel_upload = record.get("payroll_excel_upload") or get_payroll_excel_upload_for_month(
+		company, record.get("payroll_month")
+	)
+	return _site_file_path(get_company_logo_path(company, payroll_excel_upload))
+
+
+def _remove_table_borders(table) -> None:
+	from docx.oxml import OxmlElement
+	from docx.oxml.ns import qn
+
+	tbl_pr = table._tbl.tblPr
+	existing = tbl_pr.find(qn("w:tblBorders"))
+	if existing is not None:
+		tbl_pr.remove(existing)
+	borders = OxmlElement("w:tblBorders")
+	for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+		element = OxmlElement(f"w:{edge}")
+		element.set(qn("w:val"), "nil")
+		element.set(qn("w:sz"), "0")
+		element.set(qn("w:space"), "0")
+		element.set(qn("w:color"), "auto")
+		borders.append(element)
+	tbl_pr.append(borders)
+
+
+def _set_full_width_table(table, width_twips: int) -> None:
+	from docx.oxml import OxmlElement
+	from docx.oxml.ns import qn
+
+	tbl = table._tbl
+	tbl_pr = tbl.tblPr
+	tbl_w = tbl_pr.find(qn("w:tblW"))
+	if tbl_w is None:
+		tbl_w = OxmlElement("w:tblW")
+		tbl_pr.append(tbl_w)
+	tbl_w.set(qn("w:w"), str(width_twips))
+	tbl_w.set(qn("w:type"), "dxa")
+
+	layout = tbl_pr.find(qn("w:tblLayout"))
+	if layout is None:
+		layout = OxmlElement("w:tblLayout")
+		tbl_pr.append(layout)
+	layout.set(qn("w:type"), "fixed")
+
+	indent = tbl_pr.find(qn("w:tblInd"))
+	if indent is None:
+		indent = OxmlElement("w:tblInd")
+		tbl_pr.append(indent)
+	indent.set(qn("w:w"), "0")
+	indent.set(qn("w:type"), "dxa")
+
+	grid = tbl.find(qn("w:tblGrid"))
+	cols = list(grid.findall(qn("w:gridCol"))) if grid is not None else []
+	left = width_twips // 2
+	right = width_twips - left
+	widths = (left, right)
+	for col, width in zip(cols, widths, strict=False):
+		col.set(qn("w:w"), str(width))
+	for cell, width in zip(table.rows[0].cells, widths, strict=False):
+		tc_pr = cell._tc.get_or_add_tcPr()
+		tc_w = tc_pr.find(qn("w:tcW"))
+		if tc_w is None:
+			tc_w = OxmlElement("w:tcW")
+			tc_pr.append(tc_w)
+		tc_w.set(qn("w:w"), str(width))
+		tc_w.set(qn("w:type"), "dxa")
+		v_align = tc_pr.find(qn("w:vAlign"))
+		if v_align is None:
+			v_align = OxmlElement("w:vAlign")
+			tc_pr.append(v_align)
+		v_align.set(qn("w:val"), "center")
+
+
+def _add_header_picture(cell, path: str, align, *, logo: bool) -> None:
+	from docx.shared import Inches, Pt
+	from PIL import Image
+
+	paragraph = cell.paragraphs[0]
+	paragraph.alignment = align
+	paragraph.paragraph_format.space_before = Pt(0)
+	paragraph.paragraph_format.space_after = Pt(0)
+	run = paragraph.add_run()
+	if logo:
+		run.add_picture(path, height=Inches(0.85))
+		return
+	with Image.open(path) as image:
+		wide = image.width >= image.height
+	if wide:
+		run.add_picture(path, width=Inches(0.95))
+	else:
+		run.add_picture(path, height=Inches(0.95))
+
+
+def _inject_employee_photo(doc, record: dict, employee_id_number: str | None = None) -> None:
+	"""Logo on the left, employee photo in the top-right, PAYSLIP centered below."""
+	from docx.enum.text import WD_ALIGN_PARAGRAPH
+	from docx.shared import Emu
+
+	photo_path = _employee_photo_path(record, employee_id_number)
+	if not photo_path or not doc.paragraphs:
+		return
+	logo_path = _payslip_logo_path(record)
+	logo_para = doc.paragraphs[0]
+	try:
+		section = doc.sections[0]
+		usable = int(section.page_width - section.left_margin - section.right_margin)
+		header = doc.add_table(rows=1, cols=2)
+		_remove_table_borders(header)
+		_set_full_width_table(header, int(Emu(usable).twips))
+		if logo_path:
+			_add_header_picture(header.rows[0].cells[0], logo_path, WD_ALIGN_PARAGRAPH.LEFT, logo=True)
+		_add_header_picture(header.rows[0].cells[1], photo_path, WD_ALIGN_PARAGRAPH.RIGHT, logo=False)
+		logo_para._p.addprevious(header._tbl)
+		if not (logo_para.text or "").strip().upper().startswith("PAYSLIP"):
+			logo_para._element.getparent().remove(logo_para._element)
+	except Exception:
+		tbl = header._tbl if "header" in locals() else None
+		if tbl is not None and tbl.getparent() is not None:
+			tbl.getparent().remove(tbl)
+		frappe.log_error(title="Payslip employee photo")
+
+
+def _clear_template_signatories(doc) -> None:
+	"""Drop the fixed names and the blank lines under 'For MUGANGA SACCO'."""
+	seen_for = False
+	remove = []
+	for paragraph in doc.paragraphs:
+		text = (paragraph.text or "").strip()
+		if text.upper().startswith("FOR "):
+			seen_for = True
+			continue
+		if seen_for:
+			remove.append(paragraph._element)
+	for element in remove:
+		parent = element.getparent()
+		if parent is not None:
+			parent.remove(element)
+
+
+def _append_payslip_signoff(doc, signoff: dict | None) -> None:
+	"""Verified by (HR) and Approved by (DAF) for whoever approved this request."""
+	if not signoff:
+		return
+	blocks = [block for block in (signoff.get("verified_by"), signoff.get("approved_by")) if block]
+	if not blocks:
+		return
+	_clear_template_signatories(doc)
+	try:
+		from docx.oxml import OxmlElement
+		from docx.oxml.ns import qn
+		from docx.shared import Emu, Inches, Pt
+
+		table = doc.add_table(rows=1, cols=len(blocks))
+		_remove_table_borders(table)
+		if len(blocks) == 2:
+			section = doc.sections[0]
+			usable = int(section.page_width - section.left_margin - section.right_margin)
+			_set_full_width_table(table, int(Emu(usable).twips))
+		tr_pr = table.rows[0]._tr.get_or_add_trPr()
+		tr_pr.append(OxmlElement("w:cantSplit"))
+
+		for cell, block in zip(table.rows[0].cells, blocks, strict=False):
+			tc_pr = cell._tc.get_or_add_tcPr()
+			v_align = tc_pr.find(qn("w:vAlign"))
+			if v_align is None:
+				v_align = OxmlElement("w:vAlign")
+				tc_pr.append(v_align)
+			v_align.set(qn("w:val"), "top")
+
+			def _tight(paragraph, before=0):
+				paragraph.paragraph_format.space_before = Pt(before)
+				paragraph.paragraph_format.space_after = Pt(0)
+				paragraph.paragraph_format.line_spacing = 1.0
+
+			heading = cell.paragraphs[0]
+			_tight(heading, 2)
+			heading_run = heading.add_run(block.get("heading") or "")
+			heading_run.bold = True
+			heading_run.font.size = Pt(11)
+
+			name = cell.add_paragraph()
+			_tight(name)
+			name_run = name.add_run(block.get("name") or "")
+			name_run.bold = True
+			name_run.font.size = Pt(11)
+
+			if block.get("title"):
+				title = cell.add_paragraph()
+				_tight(title)
+				title_run = title.add_run(block.get("title"))
+				title_run.font.size = Pt(9)
+
+			image_path = block.get("image_path")
+			if image_path and os.path.exists(image_path):
+				signature = cell.add_paragraph()
+				_tight(signature)
+				signature.add_run().add_picture(image_path, height=Inches(0.32))
+
+			if block.get("approved_on"):
+				when = cell.add_paragraph()
+				_tight(when)
+				when_run = when.add_run(_("Approved on {0}").format(block.get("approved_on")))
+				when_run.font.size = Pt(8)
+	except Exception:
+		frappe.log_error(title="Payslip sign-off")
+
+
 PAYSLIP_FIELDS = [
 	"name",
 	"modified",
@@ -678,6 +928,7 @@ def _insert_paragraph_after(paragraph, text: str):
 	new_p = OxmlElement("w:p")
 	paragraph._p.addnext(new_p)
 	new_para = Paragraph(new_p, paragraph._parent)
+	new_para = Paragraph(new_p, paragraph._parent)
 	new_para.add_run(text)
 	return new_para
 
@@ -909,6 +1160,7 @@ def build_payslip_docx(
 	from_month: str | None = None,
 	to_month: str | None = None,
 	payroll_month: str | None = None,
+	signoff: dict | None = None,
 ) -> bytes:
 	try:
 		from docx import Document
@@ -990,6 +1242,8 @@ def build_payslip_docx(
 
 	_trim_table_data_rows(table, first_data_row, display_rows)
 	_apply_one_page_layout(doc, display_rows)
+	_inject_employee_photo(doc, latest, employee_id_number)
+	_append_payslip_signoff(doc, signoff)
 
 	buffer = io.BytesIO()
 	doc.save(buffer)

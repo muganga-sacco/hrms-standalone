@@ -2,7 +2,15 @@
 // License: GNU General Public License v3. See license.txt
 
 function payslip_is_hr_approver() {
-	return frappe.user.has_role("HR Manager") || frappe.user.has_role("HR User");
+	return (
+		frappe.session.user === "Administrator" ||
+		frappe.user.has_role("HR Manager") ||
+		frappe.user.has_role("HR User")
+	);
+}
+
+function payslip_is_daf() {
+	return frappe.session.user === "Administrator" || frappe.user.has_role("DAF");
 }
 
 function payslip_hr_picks_employee() {
@@ -142,6 +150,7 @@ frappe.ui.form.on("Payslip Request", {
 	refresh(frm) {
 		frm.clear_custom_buttons();
 		const is_hr = payslip_is_hr_approver();
+		const is_daf = payslip_is_daf();
 		payslip_fill_period(frm);
 
 		if (!payslip_hr_picks_employee()) {
@@ -162,7 +171,7 @@ frappe.ui.form.on("Payslip Request", {
 			}).addClass("btn-primary");
 		}
 
-		if (is_hr && frm.doc.status === "Pending") {
+		if (is_hr && (frm.doc.status === "Pending HR" || frm.doc.status === "Pending")) {
 			frm.add_custom_button(__("Approve"), () => {
 				frappe.call({
 					method: "hrms.payroll.doctype.payslip_request.payslip_request.approve_payslip_request",
@@ -173,7 +182,25 @@ frappe.ui.form.on("Payslip Request", {
 					},
 				});
 			}).addClass("btn-primary");
+		}
 
+		if (is_daf && frm.doc.status === "Pending DAF") {
+			frm.add_custom_button(__("Approve"), () => {
+				frappe.call({
+					method: "hrms.payroll.doctype.payslip_request.payslip_request.daf_approve_payslip_request",
+					args: { docname: frm.doc.name },
+					freeze: true,
+					callback() {
+						frm.reload_doc();
+					},
+				});
+			}).addClass("btn-primary");
+		}
+
+		if (
+			(is_hr || is_daf) &&
+			["Pending HR", "Pending DAF", "Pending"].includes(frm.doc.status)
+		) {
 			frm.add_custom_button(__("Reject"), () => {
 				frappe.prompt(
 					[

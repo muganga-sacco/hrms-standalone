@@ -10,10 +10,12 @@ frappe.pages["staff-payroll-dashboard"].on_page_load = function (wrapper) {
 		single_column: true,
 	});
 
-	if (!$("#staff-payroll-dashboard-css").length) {
-		$(
-			'<link id="staff-payroll-dashboard-css" rel="stylesheet" href="/assets/hrms/css/staff_payroll_dashboard.css?v=20261026c">'
-		).appendTo("head");
+	const payroll_css = "/assets/hrms/css/staff_payroll_dashboard.css?v=20261027a";
+	const payroll_css_link = $("#staff-payroll-dashboard-css");
+	if (payroll_css_link.length) {
+		payroll_css_link.attr("href", payroll_css);
+	} else {
+		$(`<link id="staff-payroll-dashboard-css" rel="stylesheet" href="${payroll_css}">`).appendTo("head");
 	}
 
 	const dashboard = new hrms.StaffPayrollDashboard(page);
@@ -378,11 +380,13 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 			data.grand_total_label ||
 			(data.month_label ? `GRAND TOTAL_${data.month_label}` : "GRAND TOTAL");
 		const totals_html = this.render_total_row(data.totals, grand_label);
-		const { logo_html, footer, signatures_html, filter_hint_html } = this.build_sheet_chrome(data);
+		const { logo_html, footer, signatures_html, filter_hint_html, signed_payroll_html } =
+			this.build_sheet_chrome(data);
 
 		this.sheet_host.html(`
 			<div class="sheet-wrap">
 				${filter_hint_html}
+				${signed_payroll_html}
 				<div class="sheet-brand-row">
 					${logo_html}
 					<div class="sheet-title">${frappe.utils.escape_html(data.title || "")}</div>
@@ -478,18 +482,31 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 						[applied.payroll_sheet_type, applied.payroll_month]
 				  )}</div>`
 				: "";
-		return { logo_html, footer, signatures_html, filter_hint_html };
+		const signed_links = (data.signed_payrolls || [])
+			.map((file) => {
+				const label = `${file.payroll_sheet_type || ""}: ${file.file_name || ""}`.trim();
+				return `<a href="${frappe.utils.escape_html(file.file_url)}" target="_blank" rel="noopener">${this.esc(
+					label
+				)}</a>`;
+			})
+			.join("");
+		const signed_payroll_html = signed_links
+			? `<div class="signed-payroll-bar"><span>${__("Signed payroll")}</span>${signed_links}</div>`
+			: "";
+		return { logo_html, footer, signatures_html, filter_hint_html, signed_payroll_html };
 	}
 
 	render_lumpsum_sheet(data) {
 		const rows_html = data.rows.map((row) => this.render_lumpsum_data_row(row)).join("");
 		const grand_label = data.grand_total_label || "GRAND TOTAL";
 		let totals_html = this.render_lumpsum_total_row(data.totals, grand_label);
-		const { logo_html, footer, signatures_html, filter_hint_html } = this.build_sheet_chrome(data);
+		const { logo_html, footer, signatures_html, filter_hint_html, signed_payroll_html } =
+			this.build_sheet_chrome(data);
 
 		this.sheet_host.html(`
 			<div class="sheet-wrap sheet-wrap-lumpsum">
 				${filter_hint_html}
+				${signed_payroll_html}
 				<div class="sheet-brand-row">
 					${logo_html}
 					<div class="sheet-title">${frappe.utils.escape_html(data.title || "")}</div>
@@ -538,10 +555,11 @@ hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 			);
 			return;
 		}
-		const { filter_hint_html } = this.build_sheet_chrome(data);
+		const { filter_hint_html, signed_payroll_html } = this.build_sheet_chrome(data);
 		const blocks = sheets.map((sheet) => this.variable_sheet_block(sheet)).join("");
 		this.sheet_host.html(`
 			${filter_hint_html}
+			${signed_payroll_html}
 			<div class="variable-sheet-stack">${blocks}</div>
 		`);
 	}

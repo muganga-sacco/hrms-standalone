@@ -145,6 +145,7 @@ def _variable_month_response(records: list[dict], month, company: str | None, re
 
 	return {
 		"layout": "variable",
+		"signed_payrolls": _signed_payroll_files(company, month),
 		"payroll_sheet_type": "Variable",
 		"filters_applied": {
 			"payroll_month": month.isoformat(),
@@ -282,6 +283,34 @@ def _lumpsum_sheet_banner(
 		if best and len(best) > len(fallback_label or ""):
 			return best.upper()
 	return (fallback_label or "").upper()
+
+
+def _signed_payroll_files(company: str | None, month) -> list[dict]:
+	"""Signed PDF or Excel attached to payroll uploads for this month."""
+	filters: dict = {"payroll_month": month, "signed_payroll": ["is", "set"]}
+	if company:
+		filters["company"] = company
+	rows = frappe.get_all(
+		"Payroll Excel Upload",
+		filters=filters,
+		fields=["name", "payroll_sheet_type", "signed_payroll"],
+		order_by="modified desc",
+	)
+	files = []
+	for row in rows:
+		file_url = row.signed_payroll
+		file_name = frappe.db.get_value("File", {"file_url": file_url}, "file_name")
+		if not file_name and file_url:
+			file_name = file_url.rsplit("/", 1)[-1]
+		files.append(
+			{
+				"upload": row.name,
+				"payroll_sheet_type": row.payroll_sheet_type,
+				"file_url": file_url,
+				"file_name": file_name,
+			}
+		)
+	return files
 
 
 ROW_FIELDS = [
@@ -449,6 +478,7 @@ def get_staff_payroll_dashboard(
 		"payroll_month": month.isoformat(),
 		"month_label": month.strftime("%B").upper(),
 		"grand_total_label": grand_total_label,
+		"signed_payrolls": _signed_payroll_files(effective_company, month),
 		"currency": currency or "RWF",
 		"rows": rows,
 		"totals": totals,

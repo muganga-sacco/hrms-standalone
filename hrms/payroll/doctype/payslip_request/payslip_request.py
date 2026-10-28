@@ -108,7 +108,7 @@ class PayslipRequest(Document):
 
 	def _set_employee_for_self_service(self) -> None:
 
-		if user_has_hr_payroll_access() or frappe.flags.in_install:
+		if user_can_see_all_payslip_requests() or frappe.flags.in_install:
 
 			return
 
@@ -132,7 +132,7 @@ class PayslipRequest(Document):
 
 	def _validate_period_fields(self) -> None:
 
-		if self.status not in ("Draft", "Pending"):
+		if self.status not in ("Draft", "Pending", "Pending HR", "Pending DAF"):
 
 			return
 
@@ -197,7 +197,7 @@ def _own_payslip_rules(doc, ptype: str, user: str, employee: str | None) -> bool
 
 			return False
 
-		if ptype == "write" and doc.status not in ("Draft", "Pending"):
+		if ptype == "write" and doc.status != "Draft":
 
 			return False
 
@@ -215,7 +215,7 @@ def _own_payslip_rules(doc, ptype: str, user: str, employee: str | None) -> bool
 
 		return False
 
-	if ptype == "write" and doc.status not in ("Draft", "Pending"):
+	if ptype == "write" and doc.status != "Draft":
 
 		return False
 
@@ -383,7 +383,7 @@ def submit_payslip_request(docname: str):
 
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
-	doc.status = "Pending"
+	doc.status = "Pending HR"
 
 	doc.save(ignore_permissions=True)
 
@@ -403,15 +403,19 @@ def approve_payslip_request(docname: str):
 
 	doc = _get_request_doc(docname)
 
-	if doc.status != "Pending":
+	if doc.status not in ("Pending HR", "Pending"):
 
-		frappe.throw(_("Only pending requests can be approved."))
+		frappe.throw(_("Only requests waiting for HR can be approved."))
 
-	doc.status = "Approved"
+	from hrms.payroll.payroll_import.payroll_signoff import approver_profile
 
-	doc.approved_by = frappe.session.user
+	approver_profile(frappe.session.user, request=doc, prefer="prepared")
 
-	doc.approved_on = now_datetime()
+	doc.status = "Pending DAF"
+
+	doc.hr_approved_by = frappe.session.user
+
+	doc.hr_approved_on = now_datetime()
 
 	doc.rejection_reason = None
 
@@ -433,19 +437,61 @@ def approve_payslip_request(docname: str):
 
 @frappe.whitelist()
 
-def reject_payslip_request(docname: str, rejection_reason: str | None = None):
+def daf_approve_payslip_request(docname: str):
 
-	throw_if_not_hr_payroll()
+	from hrms.payroll.payroll_import.payroll_signoff import approver_profile, throw_if_not_daf
+
+	throw_if_not_daf()
 
 	doc = _get_request_doc(docname)
 
-	if doc.status != "Pending":
+	if doc.status != "Pending DAF":
 
-		frappe.throw(_("Only pending requests can be rejected."))
+		frappe.throw(_("Only requests waiting for DAF can be approved."))
+
+	approver_profile(frappe.session.user, request=doc, prefer="verified")
+
+	doc.status = "Approved"
+
+	doc.daf_approved_by = frappe.session.user
+
+	doc.daf_approved_on = now_datetime()
+
+	doc.approved_by = frappe.session.user
+
+	doc.approved_on = doc.daf_approved_on
+
+	doc.rejection_reason = None
+
+	doc.save(ignore_permissions=True)
+
+	frappe.db.commit()
+
+	return {"status": doc.status}
+
+
+
+
+
+@frappe.whitelist()
+
+def reject_payslip_request(docname: str, rejection_reason: str | None = None):
+
+	from hrms.payroll.payroll_import.payroll_signoff import user_has_daf_access
+
+	doc = _get_request_doc(docname)
+
+	if doc.status not in ("Pending HR", "Pending DAF", "Pending"):
+
+		frappe.throw(_("Only requests waiting for approval can be rejected."))
+
+	if not (user_has_hr_payroll_access() or user_has_daf_access()):
+
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	doc.status = "Rejected"
 
-	doc.rejection_reason = (rejection_reason or "").strip() or _("Rejected by HR")
+	doc.rejection_reason = (rejection_reason or "").strip() or _("Rejected")
 
 	doc.approved_by = frappe.session.user
 
@@ -531,7 +577,7 @@ def download_payslip_for_request(docname: str):
 
 	if doc.status != "Approved":
 
-		frappe.throw(_("Payslip can only be downloaded after HR approval."))
+		frappe.throw(_("Payslip can only be downloaded after HR and DAF approval."))
 
 	if not _user_may_act_on_own_request(doc):
 
@@ -545,10 +591,12 @@ def download_payslip_for_request(docname: str):
 
 	)
 
+	from hrms.payroll.payroll_import.payroll_signoff import signoff_for_request
+
 
 
 	params = build_download_params_from_request(doc)
 
-	_send_payslip_docx_response(**params)
+	_send_payslip_docx_response(**params, signoff=signoff_for_request(doc))
 
 

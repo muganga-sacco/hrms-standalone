@@ -39,6 +39,7 @@ def _send_payslip_docx_response(
 	from_month: str | None = None,
 	to_month: str | None = None,
 	payroll_month: str | None = None,
+	signoff: dict | None = None,
 ):
 	from hrms.payroll.payroll_import.payslip_docx import build_payslip_docx
 
@@ -50,6 +51,7 @@ def _send_payslip_docx_response(
 			from_month=from_month,
 			to_month=to_month,
 			payroll_month=payroll_month,
+			signoff=signoff,
 		)
 	except Exception:
 		frappe.log_error(title="Payslip download failed")

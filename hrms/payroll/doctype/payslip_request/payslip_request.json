@@ -12,8 +12,6 @@
   "company",
   "column_break_1",
   "status",
-  "approved_by",
-  "approved_on",
   "section_break_period",
   "period_type",
   "months",
@@ -25,6 +23,12 @@
   "to_month_name",
   "to_month",
   "section_break_hr",
+  "hr_approved_by",
+  "hr_approved_on",
+  "daf_approved_by",
+  "daf_approved_on",
+  "approved_by",
+  "approved_on",
   "rejection_reason",
   "remarks"
  ],
@@ -72,12 +76,13 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Draft\nPending\nApproved\nRejected",
+   "options": "Draft\nPending HR\nPending DAF\nApproved\nRejected",
    "read_only": 1
   },
   {
    "fieldname": "approved_by",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Approved By",
    "options": "User",
    "read_only": 1
@@ -85,7 +90,34 @@
   {
    "fieldname": "approved_on",
    "fieldtype": "Datetime",
+   "hidden": 1,
    "label": "Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "hr_approved_by",
+   "fieldtype": "Link",
+   "label": "Verified By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "hr_approved_on",
+   "fieldtype": "Datetime",
+   "label": "HR Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "daf_approved_by",
+   "fieldtype": "Link",
+   "label": "DAF Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "daf_approved_on",
+   "fieldtype": "Datetime",
+   "label": "DAF Approved On",
    "read_only": 1
   },
   {

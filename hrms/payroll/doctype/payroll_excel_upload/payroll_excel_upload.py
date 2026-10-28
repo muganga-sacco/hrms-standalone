@@ -56,6 +56,14 @@ class PayrollExcelUpload(Document):
 			self.payroll_month = month
 			self.payroll_year = str(month.year)
 			self.payroll_month_name = PAYROLL_MONTHS[month.month - 1]
+		self._validate_signed_payroll()
+
+	def _validate_signed_payroll(self) -> None:
+		if not self.signed_payroll:
+			return
+		url = self.signed_payroll.lower().split("?")[0]
+		if not url.endswith((".pdf", ".xlsx", ".xls")):
+			frappe.throw(_("Signed Payroll must be a PDF or Excel file."))
 
 
 @frappe.whitelist()

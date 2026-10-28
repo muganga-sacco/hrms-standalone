@@ -5,6 +5,8 @@ frappe.listview_settings["Payslip Request"] = {
 	get_indicator(doc) {
 		const colors = {
 			Draft: "gray",
+			"Pending HR": "orange",
+			"Pending DAF": "blue",
 			Pending: "orange",
 			Approved: "green",
 			Rejected: "red",

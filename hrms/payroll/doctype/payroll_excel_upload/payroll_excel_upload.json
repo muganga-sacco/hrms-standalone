@@ -20,6 +20,8 @@
   "payroll_sheet_footer",
   "section_break_file",
   "payroll_file",
+  "section_break_signoff",
+  "signed_payroll",
   "section_break_log",
   "import_log"
  ],
@@ -111,6 +113,17 @@
    "fieldtype": "Attach",
    "label": "Payroll Excel File",
    "reqd": 1
+  },
+  {
+   "fieldname": "section_break_signoff",
+   "fieldtype": "Section Break",
+   "label": "Payroll Sign-off"
+  },
+  {
+   "description": "PDF or Excel of this payroll sheet after it has been signed.",
+   "fieldname": "signed_payroll",
+   "fieldtype": "Attach",
+   "label": "Signed Payroll"
   },
   {
    "fieldname": "section_break_log",

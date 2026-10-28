@@ -99,6 +99,7 @@ after_migrate = [
 	"basic.setup.update_select_perm_after_install",
 	"hrms.payroll.setup.ensure_payroll_dashboard_permissions.ensure_payroll_dashboard_permissions",
 	"hrms.payroll.payroll_import.employee_id_setup.ensure_employee_id_field",
+	"hrms.payroll.setup.payroll_signoff_setup.ensure_payroll_signoff",
 ]
 
 # Uninstallation

@@ -203,6 +203,23 @@
 	font-size: 11px;
 }
 
+.staff-payroll-dashboard .signed-payroll-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 16px;
+	margin: 0 8px 12px;
+	padding: 8px 12px;
+	background: #f4f5f6;
+	border: 1px solid #d1d8dd;
+	border-radius: 6px;
+	font-size: 13px;
+}
+
+.staff-payroll-dashboard .signed-payroll-bar span {
+	font-weight: 600;
+}
+
 .staff-payroll-dashboard .sheet-filter-hint {
 	padding: 8px 12px;
 	font-size: 12px;
