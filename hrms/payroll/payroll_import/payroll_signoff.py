@@ -36,13 +36,13 @@ def approver_profile(user: str, request=None, prefer: str | None = None) -> dict
 	"""
 	if not user:
 		frappe.throw(_("Approver is required."))
-	row = _user_signoff_row(user)
-	if row and row.payroll_signature:
-		return row
 	if request is not None and _apply_signature_from_signed_payroll(user, request, prefer):
 		row = _user_signoff_row(user)
 		if row and row.payroll_signature:
 			return row
+	row = _user_signoff_row(user)
+	if row and row.payroll_signature:
+		return row
 	frappe.throw(
 		_("Upload your signature on your User profile (Payroll Sign-off) before approving.")
 	)
@@ -97,14 +97,22 @@ def _signed_payroll_uploads(request) -> list[dict]:
 	company = request.get("company")
 	if company:
 		filters["company"] = company
-	if months:
-		filters["payroll_month"] = ["in", months]
-	return frappe.get_all(
+	rows = frappe.get_all(
 		"Payroll Excel Upload",
 		filters=filters,
 		fields=["name", "signed_payroll", "payroll_sheet_footer", "payroll_month", "payroll_sheet_type"],
-		order_by="payroll_month desc, modified desc",
+		order_by="modified desc",
 	)
+	if not months:
+		return rows
+	matched = []
+	for row in rows:
+		month = row.payroll_month
+		key = month.isoformat() if hasattr(month, "isoformat") else str(month or "")
+		if key in set(months):
+			matched.append(row)
+	# The signed file may be attached to a neighbouring month. Use the latest one.
+	return matched or rows[:1]
 
 
 def _file_path(file_url: str | None) -> str | None:
@@ -133,50 +141,309 @@ def _footer_signatures(raw) -> list[dict]:
 	return [sig for sig in signatures if isinstance(sig, dict)]
 
 
-def _pdf_signature_images(path: str) -> list[dict]:
-	"""Signature pictures on the sheet, left to right, excluding the logo."""
+_HEADINGS = (
+	("prepared by", "Prepared by"),
+	("verified by", "Verified by"),
+	("approved by", "Approved by"),
+)
+
+
+def _pdf_text_chunks(page) -> list[dict]:
+	chunks = []
+
+	def visitor(text, cm, tm, font_dict, font_size):
+		cleaned = (text or "").replace("\x00", "").strip()
+		if cleaned:
+			chunks.append({"text": cleaned, "x": float(tm[4]), "y": float(tm[5])})
+
+	page.extract_text(visitor_text=visitor)
+	return chunks
+
+
+def _placed_images(page) -> list[dict]:
+	contents = page.get_contents()
+	if contents is None:
+		return []
+	data = contents.get_data().decode("latin1", errors="replace")
+	pattern = re.compile(
+		r"q\s+([-\d.]+)\s+[-\d.]+\s+[-\d.]+\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+cm\s*/(\S+)\s+Do",
+		re.S,
+	)
+	blobs = {image.name or "": image.data for image in page.images}
+	placed = []
+	for match in pattern.finditer(data):
+		token = match.group(5).lstrip("/")
+		blob = next((value for name, value in blobs.items() if token in name), None)
+		if not blob:
+			continue
+		placed.append(
+			{
+				"x": float(match.group(3)),
+				"y": float(match.group(4)),
+				"w": abs(float(match.group(1))),
+				"h": abs(float(match.group(2))),
+				"blob": blob,
+			}
+		)
+	return placed
+
+
+def _heading_markers(chunks: list[dict]) -> list[dict]:
+	found = []
+	seen = set()
+	for chunk in chunks:
+		lower = chunk["text"].lower()
+		for key, label in _HEADINGS:
+			if key in lower and key not in seen:
+				seen.add(key)
+				found.append({**chunk, "heading": label, "key": key})
+				break
+	return sorted(found, key=lambda item: item["x"])
+
+
+def _name_and_title(chunks: list[dict], heading: dict) -> tuple[str, str]:
+	below = [
+		chunk
+		for chunk in chunks
+		if abs(chunk["x"] - heading["x"]) < 90 and chunk["y"] < heading["y"] - 1
+	]
+	below.sort(key=lambda chunk: chunk["y"], reverse=True)
+	name = ""
+	title = ""
+	for chunk in below:
+		lower = chunk["text"].lower()
+		if any(key in lower for key, _label in _HEADINGS) or lower.startswith("signature"):
+			continue
+		if not name:
+			name = chunk["text"].strip(" :")
+			continue
+		title = chunk["text"].strip(" :")
+		break
+	return name, title
+
+
+def _image_above_heading(images: list[dict], heading: dict, page_width: float) -> dict | None:
+	candidates = []
+	for image in images:
+		center = image["x"] + image["w"] / 2
+		if abs(center - heading["x"]) > page_width * 0.18:
+			continue
+		if image["y"] + image["h"] < heading["y"] - 8:
+			continue
+		candidates.append(image)
+	if not candidates:
+		return None
+	return min(candidates, key=lambda image: abs(image["y"] - heading["y"]))
+
+
+def _trim_signature(image):
+	from PIL import Image
+
+	if image.mode not in ("RGB", "RGBA"):
+		image = image.convert("RGB")
+	gray = image.convert("L")
+	mask = gray.point(lambda pixel: 255 if pixel < 240 else 0)
+	box = mask.getbbox()
+	if not box:
+		return image
+	left, top, right, bottom = box
+	pad = 6
+	left = max(0, left - pad)
+	top = max(0, top - pad)
+	right = min(image.width, right + pad)
+	bottom = min(image.height, bottom + pad)
+	if right - left < 8 or bottom - top < 8:
+		return image
+	return image.crop((left, top, right, bottom))
+
+
+def _crop_column_signature(page_image: dict, heading: dict, headings: list[dict], page_width: float, page_height: float) -> bytes | None:
+	import io
+
+	from PIL import Image
+
+	image = Image.open(io.BytesIO(page_image["blob"]))
+	scale_x = image.width / page_image["w"] if page_image["w"] else 1
+	scale_y = image.height / page_image["h"] if page_image["h"] else 1
+	index = headings.index(heading)
+	left_edge = 0 if index == 0 else (headings[index - 1]["x"] + heading["x"]) / 2
+	right_edge = page_width if index == len(headings) - 1 else (heading["x"] + headings[index + 1]["x"]) / 2
+	top_pdf = heading["y"] + 78
+	bottom_pdf = heading["y"] + 8
+
+	def to_pixel(x_pos, y_pos):
+		pixel_x = int((x_pos - page_image["x"]) * scale_x)
+		pixel_y = int((page_image["y"] + page_image["h"] - y_pos) * scale_y)
+		return pixel_x, pixel_y
+
+	left, top = to_pixel(left_edge, top_pdf)
+	right, bottom = to_pixel(right_edge, bottom_pdf)
+	left, right = sorted((max(0, left), min(image.width, right)))
+	top, bottom = sorted((max(0, top), min(image.height, bottom)))
+	if right - left < 8 or bottom - top < 8:
+		return None
+	cropped = _trim_signature(image.crop((left, top, right, bottom)))
+	buffer = io.BytesIO()
+	cropped.convert("RGB").save(buffer, format="PNG")
+	return buffer.getvalue()
+
+
+def _pen_signature_blobs(page) -> list[bytes]:
+	"""Handwritten signatures on a scanned page, left to right. Printed text is ignored."""
+	import io
+
+	from PIL import Image
+
+	if not page.images:
+		return []
+	picture = max(page.images, key=lambda image: len(image.data))
+	image = Image.open(io.BytesIO(picture.data)).convert("RGB")
+	rotation = int(page.get("/Rotate") or 0) % 360
+	if rotation:
+		image = image.rotate(360 - rotation, expand=True)
+	pixels = image.load()
+	width, height = image.size
+	points = []
+	for y in range(0, height, 2):
+		for x in range(0, width, 2):
+			red, green, blue = pixels[x, y]
+			if max(red, green, blue) - min(red, green, blue) >= 28 and max(red, green, blue) < 220:
+				points.append((x, y))
+	if len(points) < 30:
+		return []
+	points.sort()
+	clusters = [[points[0]]]
+	for point in points[1:]:
+		if point[0] - clusters[-1][-1][0] > 70:
+			clusters.append([point])
+		else:
+			clusters[-1].append(point)
+	blobs = []
+	for cluster in clusters:
+		if len(cluster) < 20:
+			continue
+		xs = [point[0] for point in cluster]
+		ys = [point[1] for point in cluster]
+		pad = 4
+		box = (
+			max(0, min(xs) - pad),
+			max(0, min(ys) - pad),
+			min(width, max(xs) + pad),
+			min(height, max(ys) + pad),
+		)
+		cropped = image.crop(box)
+		ink = cropped.load()
+		for py in range(cropped.height):
+			for px in range(cropped.width):
+				red, green, blue = ink[px, py]
+				if max(red, green, blue) - min(red, green, blue) < 28 or max(red, green, blue) >= 220:
+					ink[px, py] = (255, 255, 255)
+		buffer = io.BytesIO()
+		_trim_signature(cropped).save(buffer, format="PNG")
+		blobs.append(buffer.getvalue())
+	return blobs
+
+
+def _signatories_from_pdf(path: str) -> list[dict]:
 	from pypdf import PdfReader
 
 	reader = PdfReader(path)
 	if not reader.pages:
 		return []
 	page = reader.pages[0]
-	contents = page.get_contents()
-	if contents is None:
+	page_width = float(page.mediabox.width)
+	page_height = float(page.mediabox.height)
+	chunks = _pdf_text_chunks(page)
+	headings = _heading_markers(chunks)
+	images = _placed_images(page)
+	small = [image for image in images if image["w"] < page_width * 0.45 and image["h"] < page_height * 0.4]
+	large = [image for image in images if image["w"] >= page_width * 0.55]
+	signatories = []
+	if headings and small:
+		for heading in headings:
+			image = _image_above_heading(small, heading, page_width)
+			if not image:
+				continue
+			name, title = _name_and_title(chunks, heading)
+			signatories.append(
+				{"heading": heading["heading"], "name": name, "title": title, "blob": image["blob"]}
+			)
+	if not signatories and headings and large:
+		for heading in headings:
+			blob = _crop_column_signature(large[0], heading, headings, page_width, page_height)
+			if not blob:
+				continue
+			name, title = _name_and_title(chunks, heading)
+			signatories.append(
+				{"heading": heading["heading"], "name": name, "title": title, "blob": blob}
+			)
+	if not signatories and large:
+		blobs = _pen_signature_blobs(page)
+		labels = ["Prepared by", "Verified by", "Approved by"]
+		for index, blob in enumerate(blobs[:3]):
+			signatories.append(
+				{
+					"heading": labels[index] if index < len(labels) else "",
+					"name": "",
+					"title": "",
+					"blob": blob,
+				}
+			)
+	if signatories:
+		return signatories
+	ordered = sorted(small, key=lambda image: image["x"])
+	return [{"heading": "", "name": "", "title": "", "blob": image["blob"]} for image in ordered]
+
+
+def _signatories_from_excel(path: str, footer: list[dict]) -> list[dict]:
+	try:
+		from openpyxl import load_workbook
+	except ImportError:
 		return []
-	data = contents.get_data().decode("latin1", errors="replace")
-	placed = []
-	pattern = re.compile(
-		r"q\s+[-\d.]+\s+[-\d.]+\s+[-\d.]+\s+[-\d.]+\s+([-\d.]+)\s+([-\d.]+)\s+cm\s*/(\S+)\s+Do",
-		re.S,
-	)
-	for match in pattern.finditer(data):
-		placed.append(
+	workbook = load_workbook(path)
+	sheet = workbook.active
+	pictures = sorted(getattr(sheet, "_images", []), key=lambda image: getattr(getattr(image.anchor, "_from", None), "col", 0))
+	signatories = []
+	for index, picture in enumerate(pictures):
+		try:
+			blob = picture._data()
+		except Exception:
+			continue
+		source = footer[index] if index < len(footer) else {}
+		signatories.append(
 			{
-				"x": float(match.group(1)),
-				"y": float(match.group(2)),
-				"token": match.group(3).lstrip("/"),
+				"heading": source.get("heading") or "",
+				"name": source.get("name") or "",
+				"title": source.get("title") or "",
+				"blob": blob,
 			}
 		)
-	if not placed:
+	return signatories
+
+
+def _signatories_from_file(path: str, footer: list[dict]) -> list[dict]:
+	lower = path.lower()
+	if lower.endswith(".pdf"):
+		found = _signatories_from_pdf(path)
+	elif lower.endswith(".xlsx"):
+		found = _signatories_from_excel(path, footer)
+	else:
+		found = []
+	if not found:
 		return []
-	rows: dict[int, list[dict]] = {}
-	for item in placed:
-		rows.setdefault(round(item["y"] / 40), []).append(item)
-	signature_row = min(rows, key=lambda key: sum(item["y"] for item in rows[key]) / len(rows[key]))
-	if len(rows) > 1:
-		signature_row = min(rows, key=lambda key: sum(item["y"] for item in rows[key]) / len(rows[key]))
-	ordered = sorted(rows[signature_row], key=lambda item: item["x"])
-	images = []
-	for item in ordered:
-		blob = None
-		for image in page.images:
-			if item["token"] in (image.name or ""):
-				blob = image.data
-				break
-		if blob:
-			images.append(blob)
-	return images
+	if any(item.get("name") for item in found):
+		return found
+	merged = []
+	for item, source in zip(found, footer, strict=False):
+		merged.append(
+			{
+				"heading": item.get("heading") or source.get("heading") or "",
+				"name": source.get("name") or "",
+				"title": source.get("title") or "",
+				"blob": item["blob"],
+			}
+		)
+	return merged or found
 
 
 def _png_bytes(blob: bytes) -> bytes:
@@ -217,7 +484,7 @@ def _store_user_signature(user: str, png: bytes, title: str | None) -> None:
 	)
 	file_doc.save(ignore_permissions=True)
 	values = {"payroll_signature": file_doc.file_url}
-	if title and not frappe.db.get_value("User", user, "payroll_signatory_title"):
+	if title:
 		values["payroll_signatory_title"] = title
 	frappe.db.set_value("User", user, values, update_modified=False)
 
@@ -225,37 +492,26 @@ def _store_user_signature(user: str, png: bytes, title: str | None) -> None:
 def _apply_signature_from_signed_payroll(user: str, request, prefer: str | None) -> bool:
 	full_name = frappe.db.get_value("User", user, "full_name")
 	for upload in _signed_payroll_uploads(request):
-		file_url = upload.signed_payroll or ""
-		if not str(file_url).lower().endswith(".pdf"):
-			continue
-		path = _file_path(file_url)
+		path = _file_path(upload.signed_payroll)
 		if not path:
 			continue
+		footer = _footer_signatures(upload.payroll_sheet_footer)
 		try:
-			images = _pdf_signature_images(path)
+			signatories = _signatories_from_file(path, footer)
 		except Exception:
 			frappe.log_error(title="Signed payroll signature")
 			continue
-		signatures = _footer_signatures(upload.payroll_sheet_footer)
-		if not images or not signatures:
-			continue
-		pairs = list(zip(signatures, images, strict=False))
-		matched = [
-			(sig, blob)
-			for sig, blob in pairs
-			if _names_match(full_name, sig.get("name"))
-		]
+		matched = [item for item in signatories if _names_match(full_name, item.get("name"))]
 		if not matched:
 			continue
 		chosen = matched[0]
 		if prefer:
-			for sig, blob in matched:
-				if prefer in (sig.get("heading") or "").lower():
-					chosen = (sig, blob)
+			for item in matched:
+				if prefer in (item.get("heading") or "").lower():
+					chosen = item
 					break
-		sig, blob = chosen
 		try:
-			_store_user_signature(user, _png_bytes(blob), (sig.get("title") or "").strip())
+			_store_user_signature(user, _png_bytes(chosen["blob"]), (chosen.get("title") or "").strip())
 		except Exception:
 			frappe.log_error(title="Signed payroll signature")
 			continue
