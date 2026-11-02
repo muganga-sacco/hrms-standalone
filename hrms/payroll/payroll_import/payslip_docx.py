@@ -717,6 +717,8 @@ def _apply_staff_record_to_merged(target: dict, record: dict) -> None:
 	_add_other_deductions(target, record)
 	_add_net_paid(target, record)
 	for field in (
+		"employee",
+		"employee_id_number",
 		"employee_name",
 		"position",
 		"department",
@@ -788,6 +790,8 @@ def _apply_lumpsum_record_to_merged(target: dict, record: dict) -> None:
 	_add_other_deductions(target, record)
 	_add_net_paid(target, record)
 	for field in (
+		"employee",
+		"employee_id_number",
 		"employee_name",
 		"position",
 		"department",
@@ -889,6 +893,8 @@ def _new_merged_payslip_row(seed: dict, month_key: str) -> dict:
 	return {
 		"payroll_month": month_key,
 		"payroll_period_label": seed.get("payroll_period_label"),
+		"employee": seed.get("employee"),
+		"employee_id_number": seed.get("employee_id_number"),
 		"employee_name": seed.get("employee_name"),
 		"position": seed.get("position"),
 		"department": seed.get("department"),
