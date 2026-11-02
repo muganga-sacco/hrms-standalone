@@ -1699,16 +1699,12 @@ def _record_to_table_row(record: dict, include_ict: bool = False) -> list[str]:
 	maternity_employer = _sheet_int(record.get("maternity_employer"))
 	paye = _sheet_int(record.get("paye"))
 	pension = _sheet_int(record.get("pension_employee"))
-	cbhi = _as_int(record.get("cbhi"))
+	cbhi = _sheet_int(record.get("cbhi"))
 	other_deductions = _sheet_int(_other_deductions_amount(record))
 	gross_salary = _flt(record.get("gross_salary"))
 	net = _sheet_int(_sheet_net_paid(record))
-	# TOTAL follows Gross − Net (payroll). Line items are then balanced so they add to TOTAL.
+	# TOTAL follows Gross − Net. Do not move leftover cents onto Other Deductions.
 	total_deductions = _sheet_int(gross_salary) - net if gross_salary and net else 0
-	paye, pension, maternity_employee, cbhi, other_deductions = _balance_deduction_columns(
-		[paye, pension, maternity_employee, cbhi, other_deductions],
-		total_deductions,
-	)
 
 	values = [
 		pay_period,
@@ -1764,33 +1760,15 @@ def _days_in_month(year: int, month: int) -> int:
 	return (next_month - date(year, month, 1)).days
 
 
-def _balance_deduction_columns(parts: list[int], total: int) -> list[int]:
-	"""Put rounding remainder on Other Deductions so PAYE+Pension+Maternity+CBHI+Other = TOTAL."""
-	shown = list(parts)
-	if not shown:
-		return shown
-	gap = int(total or 0) - sum(shown)
-	if not gap:
-		return shown
-	for index in range(len(shown) - 1, -1, -1):
-		if shown[index] + gap >= 0:
-			shown[index] += gap
-			return shown
-	shown[-1] += gap
-	return shown
+def _sheet_int(val) -> int:
+	"""Normal rounding: 5.6 → 6, 5.4 → 5, .5 and above round up."""
+	from decimal import Decimal, ROUND_HALF_UP
+
+	return int(Decimal(str(_flt(val))).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _as_int(val) -> int:
-	"""Drop cents with no round-up. Used for CBHI only."""
-	return int(_flt(val))
-
-
-def _sheet_int(val) -> int:
-	"""Payroll sheet integer: round half up so Net keeps the extra 1."""
-	amount = _flt(val)
-	if amount >= 0:
-		return int(amount + 0.5)
-	return int(amount - 0.5)
+	return _sheet_int(val)
 
 
 def _fmt(val) -> str:
