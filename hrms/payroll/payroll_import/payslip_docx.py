@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import os
 import re
@@ -103,6 +104,23 @@ def _site_file_path(path: str | None) -> str | None:
 	return None
 
 
+def _image_data_uri(path: str | None) -> str | None:
+	path = _site_file_path(path)
+	if not path:
+		return None
+	ext = os.path.splitext(path)[1].lower()
+	mime = {
+		".png": "image/png",
+		".jpg": "image/jpeg",
+		".jpeg": "image/jpeg",
+		".gif": "image/gif",
+		".webp": "image/webp",
+		".bmp": "image/bmp",
+	}.get(ext, "image/png")
+	with open(path, "rb") as handle:
+		return f"data:{mime};base64,{base64.b64encode(handle.read()).decode()}"
+
+
 def _employee_photo_path(record: dict, employee_id_number: str | None = None) -> str | None:
 	"""Photo stored on the Employee, or on the linked User when the employee image is empty."""
 	from hrms.payroll.payroll_import.payroll_employee_link import find_employee_for_payroll_id
@@ -124,6 +142,39 @@ def _employee_photo_path(record: dict, employee_id_number: str | None = None) ->
 		if user_id:
 			image = frappe.db.get_value("User", user_id, "user_image")
 	return _site_file_path(signature_image_path(image))
+
+
+def _employee_photo_url(record: dict, employee_id_number: str | None = None) -> str | None:
+	from hrms.payroll.payroll_import.payroll_employee_link import find_employee_for_payroll_id
+
+	employee = (record.get("employee") or "").strip()
+	if employee and not frappe.db.exists("Employee", employee):
+		employee = ""
+	if not employee:
+		employee = (
+			find_employee_for_payroll_id(record.get("employee_id_number") or employee_id_number) or ""
+		)
+	if not employee:
+		return None
+	image = frappe.db.get_value("Employee", employee, "image")
+	if not image:
+		user_id = frappe.db.get_value("Employee", employee, "user_id")
+		if user_id:
+			image = frappe.db.get_value("User", user_id, "user_image")
+	return image or None
+
+
+def _payslip_logo_url(record: dict) -> str | None:
+	from hrms.payroll.payroll_import.payroll_sheet_layout import (
+		get_company_logo_url,
+		get_payroll_excel_upload_for_month,
+	)
+
+	company = record.get("company")
+	payroll_excel_upload = record.get("payroll_excel_upload") or get_payroll_excel_upload_for_month(
+		company, record.get("payroll_month")
+	)
+	return get_company_logo_url(company, payroll_excel_upload)
 
 
 def _payslip_logo_path(record: dict) -> str | None:
@@ -186,9 +237,10 @@ def _set_full_width_table(table, width_twips: int) -> None:
 
 	grid = tbl.find(qn("w:tblGrid"))
 	cols = list(grid.findall(qn("w:gridCol"))) if grid is not None else []
-	left = width_twips // 2
-	right = width_twips - left
-	widths = (left, right)
+	n = max(len(table.rows[0].cells) if table.rows else 0, len(cols), 1)
+	base = width_twips // n
+	widths = [base] * n
+	widths[-1] += width_twips - sum(widths)
 	for col, width in zip(cols, widths, strict=False):
 		col.set(qn("w:w"), str(width))
 	for cell, width in zip(table.rows[0].cells, widths, strict=False):
@@ -273,26 +325,39 @@ def _clear_template_signatories(doc) -> None:
 
 
 def _append_payslip_signoff(doc, signoff: dict | None) -> None:
-	"""Verified by (HR) and Approved by (DAF) for whoever approved this request."""
-	if not signoff:
-		return
-	blocks = [block for block in (signoff.get("verified_by"), signoff.get("approved_by")) if block]
+	"""Verified by and Approved by, aligned, with the company cachet on the right."""
+	blocks = _signoff_blocks(signoff)
 	if not blocks:
 		return
 	_clear_template_signatories(doc)
 	try:
+		from docx.enum.text import WD_ALIGN_PARAGRAPH
 		from docx.oxml import OxmlElement
 		from docx.oxml.ns import qn
 		from docx.shared import Emu, Inches, Pt
 
-		table = doc.add_table(rows=1, cols=len(blocks))
+		org = doc.add_paragraph()
+		org.paragraph_format.space_before = Pt(10)
+		org.paragraph_format.space_after = Pt(8)
+		org_run = org.add_run("For MUGANGA SACCO")
+		org_run.bold = True
+		org_run.font.size = Pt(11)
+
+		cachet = (signoff or {}).get("cachet") or {}
+		cachet_path = cachet.get("image_path")
+		has_cachet = bool(cachet_path and os.path.exists(cachet_path))
+		table = doc.add_table(rows=1, cols=len(blocks) + (1 if has_cachet else 0))
 		_remove_table_borders(table)
-		if len(blocks) == 2:
-			section = doc.sections[0]
-			usable = int(section.page_width - section.left_margin - section.right_margin)
-			_set_full_width_table(table, int(Emu(usable).twips))
+		section = doc.sections[0]
+		usable = int(section.page_width - section.left_margin - section.right_margin)
+		_set_full_width_table(table, int(Emu(usable).twips))
 		tr_pr = table.rows[0]._tr.get_or_add_trPr()
 		tr_pr.append(OxmlElement("w:cantSplit"))
+
+		def _tight(paragraph, before=0):
+			paragraph.paragraph_format.space_before = Pt(before)
+			paragraph.paragraph_format.space_after = Pt(0)
+			paragraph.paragraph_format.line_spacing = 1.0
 
 		for cell, block in zip(table.rows[0].cells, blocks, strict=False):
 			tc_pr = cell._tc.get_or_add_tcPr()
@@ -302,13 +367,8 @@ def _append_payslip_signoff(doc, signoff: dict | None) -> None:
 				tc_pr.append(v_align)
 			v_align.set(qn("w:val"), "top")
 
-			def _tight(paragraph, before=0):
-				paragraph.paragraph_format.space_before = Pt(before)
-				paragraph.paragraph_format.space_after = Pt(0)
-				paragraph.paragraph_format.line_spacing = 1.0
-
 			heading = cell.paragraphs[0]
-			_tight(heading, 2)
+			_tight(heading, 0)
 			heading_run = heading.add_run(block.get("heading") or "")
 			heading_run.bold = True
 			heading_run.font.size = Pt(11)
@@ -319,23 +379,37 @@ def _append_payslip_signoff(doc, signoff: dict | None) -> None:
 			name_run.bold = True
 			name_run.font.size = Pt(11)
 
-			if block.get("title"):
-				title = cell.add_paragraph()
-				_tight(title)
-				title_run = title.add_run(block.get("title"))
-				title_run.font.size = Pt(9)
+			title = cell.add_paragraph()
+			_tight(title)
+			title_run = title.add_run(block.get("title") or "")
+			title_run.font.size = Pt(9)
 
+			signature = cell.add_paragraph()
+			_tight(signature)
 			image_path = block.get("image_path")
 			if image_path and os.path.exists(image_path):
-				signature = cell.add_paragraph()
-				_tight(signature)
-				signature.add_run().add_picture(image_path, height=Inches(0.32))
+				signature.add_run().add_picture(image_path, height=Inches(0.85))
+			else:
+				signature.add_run(" ")
 
+			when = cell.add_paragraph()
+			_tight(when, 6)
 			if block.get("approved_on"):
-				when = cell.add_paragraph()
-				_tight(when)
 				when_run = when.add_run(_("Approved on {0}").format(block.get("approved_on")))
 				when_run.font.size = Pt(8)
+
+		if has_cachet:
+			stamp_cell = table.rows[0].cells[-1]
+			tc_pr = stamp_cell._tc.get_or_add_tcPr()
+			v_align = tc_pr.find(qn("w:vAlign"))
+			if v_align is None:
+				v_align = OxmlElement("w:vAlign")
+				tc_pr.append(v_align)
+			v_align.set(qn("w:val"), "center")
+			stamp = stamp_cell.paragraphs[0]
+			_tight(stamp, 12)
+			stamp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+			stamp.add_run().add_picture(cachet_path, height=Inches(1.55))
 	except Exception:
 		frappe.log_error(title="Payslip sign-off")
 
@@ -1125,6 +1199,28 @@ def _trim_table_data_rows(table, first_data_row: int, display_rows: int) -> None
 		table._tbl.remove(table.rows[-1]._tr)
 
 
+def _set_header_font_black(table) -> None:
+	from docx.oxml import OxmlElement
+	from docx.oxml.ns import qn
+	from docx.shared import RGBColor
+
+	for row in list(table.rows)[:2]:
+		for cell in row.cells:
+			for paragraph in cell.paragraphs:
+				if not paragraph.runs:
+					paragraph.add_run(paragraph.text or "")
+				for run in paragraph.runs:
+					run.bold = True
+					run.font.color.rgb = RGBColor(0, 0, 0)
+					rPr = run._element.get_or_add_rPr()
+					for node in list(rPr):
+						if node.tag == qn("w:color"):
+							rPr.remove(node)
+					color = OxmlElement("w:color")
+					color.set(qn("w:val"), "000000")
+					rPr.append(color)
+
+
 def _apply_one_page_layout(doc, num_data_rows: int) -> None:
 	from docx.shared import Inches, Pt
 
@@ -1242,6 +1338,7 @@ def build_payslip_docx(
 
 	_trim_table_data_rows(table, first_data_row, display_rows)
 	_apply_one_page_layout(doc, display_rows)
+	_set_header_font_black(table)
 	_inject_employee_photo(doc, latest, employee_id_number)
 	_append_payslip_signoff(doc, signoff)
 
@@ -1249,6 +1346,342 @@ def build_payslip_docx(
 	doc.save(buffer)
 	buffer.seek(0)
 	return buffer.getvalue()
+
+
+def _load_payslip_records(
+	employee_id_number: str,
+	months: int = 3,
+	from_month: str | None = None,
+	to_month: str | None = None,
+	payroll_month: str | None = None,
+):
+	records = get_payroll_records_for_payslip(
+		employee_id_number,
+		months=months,
+		from_month=from_month,
+		to_month=to_month,
+		payroll_month=payroll_month,
+	)
+	if not records:
+		employee_id_number = normalize_employee_id_number(employee_id_number)
+		period_hint = _payslip_period_hint(
+			payroll_month=payroll_month,
+			from_month=from_month,
+			to_month=to_month,
+			months=months,
+		)
+		latest_rows = _payslip_get_all(
+			"Imported Payroll Record",
+			filters={"employee_id_number": employee_id_number, "docstatus": 1},
+			fields=["payroll_month"],
+			order_by="payroll_month desc",
+			limit=1,
+		)
+		latest = latest_rows[0].payroll_month if latest_rows else None
+		msg = _("No submitted payroll records found for employee ID {0}{1}.").format(
+			employee_id_number,
+			period_hint,
+		)
+		if latest:
+			msg += " " + _("Latest imported payroll month for this ID is {0}.").format(
+				getdate(latest).strftime("%B %Y")
+			)
+		frappe.throw(msg)
+
+	if payroll_month or (from_month and to_month) or from_month or to_month:
+		display_rows = len(records)
+	else:
+		display_rows = min(int(months or 3), MAX_PAYSLIP_MONTHS)
+	display_rows = min(display_rows, MAX_PAYSLIP_ROWS_ONE_PAGE)
+	return records[:display_rows]
+
+
+def _signoff_blocks(signoff: dict | None) -> list[dict]:
+	if not signoff:
+		return []
+	blocks = []
+	defaults = {
+		"verified_by": "Verified by",
+		"approved_by": "Approved by",
+	}
+	for key, heading in defaults.items():
+		block = dict(signoff.get(key) or {})
+		if not (block.get("name") or block.get("image_path") or block.get("image_data_uri")):
+			continue
+		block["heading"] = block.get("heading") or heading
+		blocks.append(block)
+	return blocks
+
+
+def _signoff_with_images(signoff: dict | None) -> dict | None:
+	if not signoff:
+		return None
+	out = dict(signoff)
+	for key in ("verified_by", "approved_by", "cachet"):
+		block = dict(out.get(key) or {})
+		if block.get("image_path"):
+			try:
+				block["image_data_uri"] = _image_data_uri(block["image_path"])
+			except Exception:
+				frappe.log_error(title="Payslip signature image")
+		out[key] = block
+	return out
+
+
+def _payslip_logo_uri(record) -> str | None:
+	return _image_data_uri(_payslip_logo_path(record))
+
+
+def _payslip_photo_uri(record, employee_id_number: str) -> str | None:
+	return _image_data_uri(_employee_photo_path(record, employee_id_number))
+
+
+def _payslip_css() -> str:
+	return """
+	*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+	body{margin:0;background:#fff}
+	.payslip-sheet{font-family:Calibri,Arial,sans-serif;color:#000;background:#fff;padding:6px 4px}
+	.banner{width:100%;border-collapse:collapse;border:0}
+	.banner td{border:0;padding:0;vertical-align:top}
+	.banner td.photo{text-align:right}
+	.payslip-logo{height:64px}
+	.payslip-photo{height:72px}
+	.payslip-title{text-align:center;font-weight:700;text-decoration:underline;font-size:12pt;letter-spacing:0.5px;margin:2px 0 8px}
+	.payslip-meta{font-size:10pt;line-height:1.35;margin:0 0 12px}
+	.payslip-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:8pt}
+	.payslip-table th,.payslip-table td{border:1px solid #000;padding:4px 3px;text-align:center;vertical-align:middle;word-wrap:break-word}
+	.payslip-table thead th.orange{background:#ED7D31;color:#000;font-weight:700}
+	.payslip-table thead th.green{background:#00B050;color:#000;font-weight:700}
+	.sign-org{font-weight:700;margin:18px 0 10px;font-size:11pt}
+	.sign{width:100%;border-collapse:collapse;border:0;table-layout:fixed;font-size:11pt}
+	.sign td{border:0;vertical-align:top;padding:0 18px 0 0}
+	.sign .heading{font-weight:700;min-height:18px}
+	.sign .name{font-weight:700;min-height:18px}
+	.sign .role{font-size:10pt;min-height:28px;margin-top:1px}
+	.sign .sig-slot{height:86px;margin:6px 0 4px}
+	.sign .sig-slot img{max-height:82px;width:auto;max-width:100%;object-fit:contain;object-position:left center;display:block}
+	.sign .when{font-size:10pt;min-height:16px}
+	.sign td.cachet{width:32%;text-align:right;vertical-align:top;padding:0}
+	.sign td.cachet .sig-slot{height:145px}
+	.sign td.cachet .sig-slot img{height:140px;max-height:140px;max-width:100%;object-fit:contain}
+	"""
+
+
+def build_payslip_html_document(
+	employee_id_number: str,
+	months: int = 3,
+	from_month: str | None = None,
+	to_month: str | None = None,
+	payroll_month: str | None = None,
+	signoff: dict | None = None,
+) -> str:
+	records = _load_payslip_records(
+		employee_id_number,
+		months=months,
+		from_month=from_month,
+		to_month=to_month,
+		payroll_month=payroll_month,
+	)
+	return _payslip_html_from_records(records, employee_id_number, signoff, full_document=True)
+
+
+def _payslip_html_from_records(records, employee_id_number: str, signoff: dict | None, full_document: bool = False) -> str:
+	latest = records[0]
+	include_ict = _payslip_has_ict(records)
+	signoff = _signoff_with_images(signoff)
+	logo = _payslip_logo_uri(latest) or ""
+	photo = _payslip_photo_uri(latest, employee_id_number) or ""
+	earning_labels = [
+		"Pay Period",
+		"Payment Date",
+		"Basic Salary",
+		"Transport allowance",
+		"TC Allowance",
+	]
+	if include_ict:
+		earning_labels.append("ICT Allowance")
+	earning_labels.extend(["Bonus and other Incentives", "Gross Lumpsum", "Gross Salary"])
+	deduction_headers = ["PAYE", "Pension", "Maternity", "CBHI", "Other Deduction"]
+	rows_html = []
+	for record in records:
+		cells = "".join(
+			f"<td>{frappe.utils.escape_html(v)}</td>"
+			for v in _visible_payslip_row(record, include_ict=include_ict)
+		)
+		rows_html.append(f"<tr>{cells}</tr>")
+	earning_ths = "".join(
+		f'<th class="orange" rowspan="2">{frappe.utils.escape_html(label)}</th>' for label in earning_labels
+	)
+	deduction_ths = "".join(
+		f'<th class="green">{frappe.utils.escape_html(label)}</th>' for label in deduction_headers
+	)
+	def _txt(value) -> str:
+		return frappe.utils.escape_html(value or "-")
+
+	def _sign_cell(block: dict) -> str:
+		img = (
+			f'<img src="{block["image_data_uri"]}" alt="signature">'
+			if block.get("image_data_uri")
+			else ""
+		)
+		when = frappe.utils.escape_html(block.get("approved_on") or "")
+		heading = frappe.utils.escape_html(block.get("heading") or "")
+		return f"""
+			<div class="heading">{heading}</div>
+			<div class="name">{frappe.utils.escape_html(block.get("name") or "")}</div>
+			<div class="role">{frappe.utils.escape_html(block.get("title") or "")}</div>
+			<div class="sig-slot">{img}</div>
+			<div class="when">{("Approved on " + when) if when else ""}</div>
+		"""
+
+	blocks = _signoff_blocks(signoff)
+	cachet = (signoff or {}).get("cachet") or {}
+	cachet_cell = ""
+	if cachet.get("image_data_uri"):
+		cachet_cell = f"""<td class="cachet">
+			<div class="heading">&nbsp;</div>
+			<div class="name">&nbsp;</div>
+			<div class="role">&nbsp;</div>
+			<div class="sig-slot"><img src="{cachet["image_data_uri"]}" alt="cachet"></div>
+		</td>"""
+
+	logo_html = f'<img class="payslip-logo" src="{logo}" alt="logo">' if logo else ""
+	photo_html = f'<img class="payslip-photo" src="{photo}" alt="employee">' if photo else ""
+	body = f"""
+	<div class="payslip-sheet">
+		<table class="banner">
+			<tr>
+				<td>{logo_html}</td>
+				<td class="photo">{photo_html}</td>
+			</tr>
+		</table>
+		<div class="payslip-title">PAYSLIP</div>
+		<div class="payslip-meta">
+			<div>EMPLOYEE NAMES: {_txt(latest.get("employee_name"))}</div>
+			<div>POSITION: {_txt(latest.get("position"))}</div>
+			<div>DEPARTMENT: {_txt(latest.get("department"))}</div>
+			<div>ACCOUNT NUMBER: {_txt(latest.get("account_number"))}</div>
+			<div>BENEFICIARY BANK: {_txt(latest.get("bank") or "M SACCO")}</div>
+		</div>
+		<table class="payslip-table">
+			<thead>
+				<tr>
+					{earning_ths}
+					<th class="green" colspan="{len(deduction_headers)}">DEDUCTIONS</th>
+					<th class="green" rowspan="2">TOTAL Deductions</th>
+					<th class="orange" rowspan="2">NET SALARY</th>
+				</tr>
+				<tr>{deduction_ths}</tr>
+			</thead>
+			<tbody>{"".join(rows_html)}</tbody>
+		</table>
+		<div class="sign-org">For MUGANGA SACCO</div>
+		<table class="sign">
+			<tr>
+				{"".join(f"<td>{_sign_cell(block)}</td>" for block in blocks)}
+				{cachet_cell}
+			</tr>
+		</table>
+	</div>
+	"""
+	if not full_document:
+		return f"<style>{_payslip_css()}</style>{body}"
+	return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>{_payslip_css()} @page{{size:A4 landscape;margin:8mm}}</style>
+</head><body>{body}</body></html>"""
+
+
+def build_payslip_pdf(
+	employee_id_number: str,
+	months: int = 3,
+	from_month: str | None = None,
+	to_month: str | None = None,
+	payroll_month: str | None = None,
+	signoff: dict | None = None,
+) -> bytes:
+	html = build_payslip_html_document(
+		employee_id_number,
+		months=months,
+		from_month=from_month,
+		to_month=to_month,
+		payroll_month=payroll_month,
+		signoff=signoff,
+	)
+	from frappe.utils.pdf import get_pdf
+
+	return get_pdf(
+		html,
+		options={
+			"orientation": "Landscape",
+			"page-size": "A4",
+			"margin-top": "8mm",
+			"margin-bottom": "8mm",
+			"margin-left": "8mm",
+			"margin-right": "8mm",
+		},
+	)
+
+
+def payslip_table_headers(include_ict: bool = False) -> list[str]:
+	headers = [
+		"Pay Period",
+		"Payment Date",
+		"Basic Salary",
+		"Transport",
+		"TC Allowance",
+	]
+	if include_ict:
+		headers.append("ICT Allowance")
+	headers.extend(
+		[
+			"Bonus and other Incentives",
+			"Gross Lumpsum",
+			"Gross Salary",
+			"PAYE",
+			"Pension",
+			"Maternity",
+			"CBHI",
+			"Other Deduction",
+			"TOTAL Deductions",
+			"NET SALARY",
+		]
+	)
+	return headers
+
+
+def build_payslip_preview(
+	employee_id_number: str,
+	months: int = 3,
+	from_month: str | None = None,
+	to_month: str | None = None,
+	payroll_month: str | None = None,
+	signoff: dict | None = None,
+) -> dict:
+	records = _load_payslip_records(
+		employee_id_number,
+		months=months,
+		from_month=from_month,
+		to_month=to_month,
+		payroll_month=payroll_month,
+	)
+	include_ict = _payslip_has_ict(records)
+	latest = records[0]
+	signoff = _signoff_with_images(signoff)
+	return {
+		"employee_name": latest.get("employee_name") or "-",
+		"position": latest.get("position") or "-",
+		"department": latest.get("department") or "-",
+		"account_number": latest.get("account_number") or "-",
+		"bank": latest.get("bank") or "-",
+		"headers": payslip_table_headers(include_ict),
+		"rows": [_visible_payslip_row(record, include_ict=include_ict) for record in records],
+		"include_ict": include_ict,
+		"logo_url": _payslip_logo_uri(latest) or _payslip_logo_url(latest),
+		"photo_url": _payslip_photo_uri(latest, employee_id_number) or _employee_photo_url(latest, employee_id_number),
+		"signoff": signoff or {},
+		"html": _payslip_html_from_records(records, employee_id_number, signoff, full_document=False),
+	}
 
 
 def _record_to_table_row(record: dict, include_ict: bool = False) -> list[str]:
@@ -1262,11 +1695,16 @@ def _record_to_table_row(record: dict, include_ict: bool = False) -> list[str]:
 		payment_date = "-"
 
 	gross_lumpsum = _flt(record.get("gross_lumpsum"))
-	maternity = _flt(record.get("maternity_employee")) + _flt(record.get("maternity_employer"))
-	other_deductions = _other_deductions_amount(record)
+	maternity_employee = _sheet_int(record.get("maternity_employee"))
+	maternity_employer = _sheet_int(record.get("maternity_employer"))
+	paye = _sheet_int(record.get("paye"))
+	pension = _sheet_int(record.get("pension_employee"))
+	cbhi = _as_int(record.get("cbhi"))
+	other_deductions = _sheet_int(_other_deductions_amount(record))
 	gross_salary = _flt(record.get("gross_salary"))
-	net = _sheet_net_paid(record)
-	total_deductions = gross_salary - net if gross_salary and net else 0.0
+	net = _sheet_int(_sheet_net_paid(record))
+	# TOTAL follows Gross − Net. Net keeps the payroll figure (do not truncate that extra 1).
+	total_deductions = _sheet_int(gross_salary) - net if gross_salary and net else 0
 
 	values = [
 		pay_period,
@@ -1281,16 +1719,25 @@ def _record_to_table_row(record: dict, include_ict: bool = False) -> list[str]:
 		_fmt(record.get("bonus_incentives")),
 		_fmt(gross_lumpsum) if gross_lumpsum else "-",
 		_fmt(gross_salary),
-		_fmt(record.get("paye")),
-		_fmt(record.get("pension_employee")),
-		_fmt(maternity / 2) if maternity else "-",
-		_fmt(maternity / 2) if maternity else "-",
-		_fmt(record.get("cbhi")),
+		_fmt(paye),
+		_fmt(pension),
+		_fmt(maternity_employee) if maternity_employee else "-",
+		_fmt(maternity_employer) if maternity_employer else "-",
+		_fmt(cbhi),
 		_fmt(other_deductions) if other_deductions else "-",
-		_fmt(total_deductions),
+		_fmt(total_deductions) if total_deductions else "-",
 		_fmt(net),
 	])
 	return values
+
+
+def _visible_payslip_row(record: dict, include_ict: bool = False) -> list[str]:
+	"""One Maternity column, matching the printed payslip header."""
+	row = _record_to_table_row(record, include_ict=include_ict)
+	employer_idx = 12 if include_ict else 11
+	if len(row) > employer_idx + 1:
+		return row[:employer_idx] + row[employer_idx + 1 :]
+	return row
 
 
 def _txt(val) -> str:
@@ -1313,11 +1760,24 @@ def _days_in_month(year: int, month: int) -> int:
 	return (next_month - date(year, month, 1)).days
 
 
+def _as_int(val) -> int:
+	"""Drop cents with no round-up. Used for CBHI only."""
+	return int(_flt(val))
+
+
+def _sheet_int(val) -> int:
+	"""Payroll sheet integer: round half up so Net keeps the extra 1."""
+	amount = _flt(val)
+	if amount >= 0:
+		return int(amount + 0.5)
+	return int(amount - 0.5)
+
+
 def _fmt(val) -> str:
-	val = _flt(val)
-	if not val:
+	n = val if isinstance(val, int) else _sheet_int(val)
+	if not n:
 		return "-"
-	return f"{val:,.0f}".replace(",", ",")
+	return f"{n:,}"
 
 
 def _flt(val):

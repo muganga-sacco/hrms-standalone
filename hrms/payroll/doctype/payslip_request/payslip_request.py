@@ -569,6 +569,61 @@ def build_download_params_from_request(doc: Document) -> dict:
 
 
 
+def _user_may_preview_payslip(doc: Document) -> bool:
+
+	from hrms.payroll.payroll_import.payroll_signoff import user_has_daf_access
+
+	if user_has_hr_payroll_access() or user_has_daf_access():
+
+		return True
+
+	return doc.status == "Approved" and _user_may_act_on_own_request(doc)
+
+
+
+
+
+@frappe.whitelist()
+
+def preview_payslip_for_request(docname: str):
+
+	from hrms.payroll.payroll_import.payslip_docx import build_payslip_preview
+	from hrms.payroll.payroll_import.payroll_signoff import signoff_for_request, user_has_daf_access
+
+	doc = _get_request_doc(docname)
+
+	if not _user_may_preview_payslip(doc):
+
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	if doc.status not in ("Pending", "Pending HR", "Pending DAF", "Approved"):
+
+		frappe.throw(_("Payslip can be previewed after the request is submitted."))
+
+	if doc.status in ("Pending", "Pending HR", "Pending DAF") and not (
+
+		user_has_hr_payroll_access() or user_has_daf_access()
+
+	):
+
+		frappe.throw(_("Only HR or DAF can preview a payslip before approval."))
+
+	params = build_download_params_from_request(doc)
+
+	preview = build_payslip_preview(**params, signoff=signoff_for_request(doc))
+
+	preview["request"] = doc.name
+
+	preview["status"] = doc.status
+
+	preview["period_type"] = doc.period_type
+
+	return preview
+
+
+
+
+
 @frappe.whitelist()
 
 def download_payslip_for_request(docname: str):

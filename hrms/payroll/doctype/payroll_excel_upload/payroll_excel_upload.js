@@ -219,6 +219,12 @@ frappe.ui.form.on("Payroll Excel Upload", {
 
 		frm.add_custom_button(__("Replace Excel File"), upload_action);
 
+		if (frappe.boot.hrms_can_add_cachet) {
+			frm.add_custom_button(__("Add Cachet"), () => {
+				hrms.payroll.add_cachet();
+			});
+		}
+
 		frm.add_custom_button(__("Refresh Logo & Signatures"), () => {
 			frappe.call({
 				method:

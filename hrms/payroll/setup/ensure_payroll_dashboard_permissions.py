@@ -247,6 +247,34 @@ def _place_variable_dashboard_in_payroll() -> None:
 	frappe.db.set_value("Workspace Link", link_name, "idx", payslip_idx, update_modified=False)
 
 
+PAYSLIP_PENDING_STATUSES = ("Pending HR", "Pending DAF", "Pending")
+PAYSLIP_PENDING_FILTER = json.dumps({"status": ["in", list(PAYSLIP_PENDING_STATUSES)]})
+
+
+def _ensure_payslip_request_pending_badge() -> None:
+	"""Workspace '0 Pending' counted status=Pending after statuses became Pending HR / Pending DAF."""
+	if not frappe.db.table_exists("Workspace Shortcut"):
+		return
+	frappe.db.sql(
+		"""
+		UPDATE `tabWorkspace Shortcut`
+		SET stats_filter = %s, format = '{} Pending'
+		WHERE link_to = 'Payslip Request' AND type = 'DocType'
+			AND IFNULL(doc_view, 'List') != 'New'
+			AND IFNULL(format, '') LIKE '%%Pending%%'
+		""",
+		PAYSLIP_PENDING_FILTER,
+	)
+	frappe.db.sql(
+		"""
+		UPDATE `tabWorkspace Shortcut`
+		SET stats_filter = %s, format = '{} Pending'
+		WHERE parent = 'Payroll' AND label = 'Payslip Request' AND type = 'DocType'
+		""",
+		PAYSLIP_PENDING_FILTER,
+	)
+
+
 def _ensure_workspace_page_link(workspace: str, label: str, page: str) -> None:
 	if not frappe.db.exists("Workspace", workspace):
 		return
@@ -317,6 +345,7 @@ def ensure_payroll_dashboard_permissions() -> dict:
 
 	payslip_self_service = _ensure_payslip_self_service_for_all_roles()
 	_ensure_variable_and_my_payroll_pages()
+	_ensure_payslip_request_pending_badge()
 
 	for doctype in doctype_read:
 		frappe.clear_cache(doctype=doctype)

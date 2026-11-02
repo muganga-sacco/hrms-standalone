@@ -10,6 +10,11 @@ frappe.ui.form.on('Payroll Settings', {
 				},
 			};
 		});
+		if (frappe.boot.hrms_can_add_cachet) {
+			frm.add_custom_button(__("Add Cachet"), () => {
+				hrms.payroll.add_cachet();
+			});
+		}
 	},
 
 	encrypt_salary_slips_in_emails: function(frm) {

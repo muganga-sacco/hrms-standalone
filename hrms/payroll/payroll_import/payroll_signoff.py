@@ -463,6 +463,497 @@ def _png_bytes(blob: bytes) -> bytes:
 	return buffer.getvalue()
 
 
+def _write_png(png: bytes, prefix: str) -> str:
+	folder = frappe.get_site_path("private", "files")
+	os.makedirs(folder, exist_ok=True)
+	path = os.path.join(folder, f"{prefix}-{frappe.generate_hash(length=10)}.png")
+	with open(path, "wb") as handle:
+		handle.write(png)
+	return path
+
+
+def _is_printed_rule_pixel(red: int, green: int, blue: int) -> bool:
+	"""Gray/black printed rule, not blue pen."""
+	hi, lo = max(red, green, blue), min(red, green, blue)
+	return hi - lo < 22 and hi < 205 and lo < 195
+
+
+def _clean_signature_image(image):
+	"""Remove leftover underlines and dashed rules under handwriting. Pen pixels stay as they are."""
+	if image.mode != "RGB":
+		image = image.convert("RGB")
+	pixels = image.load()
+	width, height = image.size
+	if width < 8 or height < 8:
+		return image
+	start = int(height * 0.45)
+	for y in range(start, height):
+		rule_xs = []
+		pen = 0
+		for x in range(width):
+			red, green, blue = pixels[x, y]
+			if _is_pen_ink(red, green, blue):
+				pen += 1
+			elif _is_printed_rule_pixel(red, green, blue):
+				rule_xs.append(x)
+		if not rule_xs:
+			continue
+		span = rule_xs[-1] - rule_xs[0] + 1
+		if len(rule_xs) < max(6, int(width * 0.08)):
+			continue
+		if span < width * 0.18:
+			continue
+		if pen > len(rule_xs) * 0.5:
+			continue
+		for x in rule_xs:
+			pixels[x, y] = (255, 255, 255)
+	return image
+
+
+def _tight_content_crop(image):
+	"""Crop empty margin only. Pixels are not recolored."""
+	image = _clean_signature_image(image)
+	if image.mode != "RGB":
+		image = image.convert("RGB")
+	pixels = image.load()
+	width, height = image.size
+	xs, ys = [], []
+	for y in range(height):
+		for x in range(width):
+			red, green, blue = pixels[x, y]
+			if _is_pen_ink(red, green, blue) or _is_stamp_ink(red, green, blue):
+				xs.append(x)
+				ys.append(y)
+	if not xs:
+		return image
+	pad = 8
+	box = (
+		max(0, min(xs) - pad),
+		max(0, min(ys) - pad),
+		min(width, max(xs) + pad),
+		min(height, max(ys) + pad),
+	)
+	if box[2] - box[0] < 8 or box[3] - box[1] < 8:
+		return image
+	return image.crop(box)
+
+
+def _page_scan_image(page):
+	import io
+
+	from PIL import Image
+
+	if not page.images:
+		return None
+	picture = max(page.images, key=lambda image: len(image.data))
+	image = Image.open(io.BytesIO(picture.data)).convert("RGB")
+	rotation = int(page.get("/Rotate") or 0) % 360
+	if rotation:
+		image = image.rotate(360 - rotation, expand=True)
+	return image
+
+
+def _table_end_row(image) -> int:
+	pixels = image.load()
+	width, height = image.size
+	last = int(height * 0.15)
+	for y0 in range(0, int(height * 0.55), 8):
+		dark = 0
+		n = 0
+		for y in range(y0, min(height, y0 + 8), 2):
+			for x in range(0, width, 6):
+				red, green, blue = pixels[x, y]
+				n += 1
+				if max(red, green, blue) < 95:
+					dark += 1
+		if n and dark / n > 0.04:
+			last = y0 + 8
+	return last
+
+
+def _is_pen_ink(red: int, green: int, blue: int) -> bool:
+	"""Handwritten blue/violet ink, not printed black text or rules."""
+	hi, lo = max(red, green, blue), min(red, green, blue)
+	if hi - lo >= 22 and blue >= red + 6 and blue >= green - 10 and hi < 225 and lo < 190:
+		return True
+	return hi < 70 and blue > red + 4 and blue > green + 2
+
+
+def _is_stamp_ink(red: int, green: int, blue: int) -> bool:
+	hi, lo = max(red, green, blue), min(red, green, blue)
+	if hi - lo < 12 or hi >= 245:
+		return False
+	if green >= red - 4 and green > 55:
+		return True
+	if red > green + 10 and red > blue + 12:
+		return True
+	return False
+
+
+def _bbox_matching(image, box: tuple[int, int, int, int], match) -> tuple[int, int, int, int]:
+	pixels = image.load()
+	left, top, right, bottom = box
+	xs, ys = [], []
+	for y in range(top, bottom):
+		for x in range(left, right):
+			red, green, blue = pixels[x, y]
+			if match(red, green, blue):
+				xs.append(x)
+				ys.append(y)
+	if not xs:
+		return box
+	pad = 5
+	return (
+		max(0, min(xs) - pad),
+		max(0, min(ys) - pad),
+		min(image.width, max(xs) + pad),
+		min(image.height, max(ys) + pad),
+	)
+
+
+def _connected_ink_box(image, box: tuple[int, int, int, int], seed_fn) -> tuple[int, int, int, int]:
+	"""Keep strokes attached to the signature/stamp, skip printed words and dashes below."""
+	seed_box = _bbox_matching(image, box, seed_fn)
+	left = max(0, seed_box[0] - 10)
+	top = max(0, seed_box[1] - 8)
+	right = min(image.width, seed_box[2] + 18)
+	bottom = min(image.height, seed_box[3] + 4)
+	pixels = image.load()
+	width, height = right - left, bottom - top
+	mask = [[False] * width for _ in range(height)]
+	for y in range(top, bottom):
+		for x in range(left, right):
+			red, green, blue = pixels[x, y]
+			if seed_fn(red, green, blue):
+				mask[y - top][x - left] = True
+	for _ in range(3):
+		added = False
+		for y in range(height):
+			for x in range(width):
+				if mask[y][x]:
+					continue
+				red, green, blue = pixels[x + left, y + top]
+				if max(red, green, blue) > 200:
+					continue
+				near = False
+				for dy in (-2, -1, 0, 1, 2):
+					for dx in (-2, -1, 0, 1, 2):
+						ny, nx = y + dy, x + dx
+						if 0 <= ny < height and 0 <= nx < width and mask[ny][nx]:
+							near = True
+							break
+					if near:
+						break
+				if near:
+					mask[y][x] = True
+					added = True
+		if not added:
+			break
+	xs, ys = [], []
+	for y in range(height):
+		for x in range(width):
+			if mask[y][x]:
+				xs.append(x + left)
+				ys.append(y + top)
+	if not xs:
+		return seed_box
+	pad = 6
+	return (
+		max(0, min(xs) - pad),
+		max(0, min(ys) - pad),
+		min(image.width, max(xs) + pad),
+		min(image.height, max(ys) + pad),
+	)
+
+
+def _colored_clusters(image, y_start: int, y_end: int) -> list[list]:
+	pixels = image.load()
+	width, _height = image.size
+	points = []
+	for y in range(max(0, y_start), min(image.height, y_end)):
+		for x in range(width):
+			red, green, blue = pixels[x, y]
+			if _is_pen_ink(red, green, blue) or _is_stamp_ink(red, green, blue):
+				points.append((x, y))
+	if len(points) < 40:
+		return []
+	points.sort()
+	clusters = [[points[0]]]
+	for point in points[1:]:
+		if point[0] - clusters[-1][-1][0] > 70:
+			clusters.append([point])
+		else:
+			clusters[-1].append(point)
+	return [cluster for cluster in clusters if len(cluster) > 80]
+
+
+def _scan_signoff_crops(page) -> list[bytes]:
+	"""Original pixels of the three sign-off marks under the payroll table."""
+	image = _page_scan_image(page)
+	if image is None:
+		return []
+	start = _table_end_row(image) + 8
+	end = min(image.height, start + 320)
+	clusters = _colored_clusters(image, start, end)
+	if len(clusters) < 2:
+		clusters = _colored_clusters(image, int(image.height * 0.18), int(image.height * 0.45))
+	if len(clusters) < 2:
+		return []
+	crops = []
+	for index, cluster in enumerate(clusters[:3]):
+		xs = [point[0] for point in cluster]
+		ys = [point[1] for point in cluster]
+		box = (
+			max(0, min(xs) - 8),
+			max(0, min(ys) - 8),
+			min(image.width, max(xs) + 8),
+			min(image.height, max(ys) + 8),
+		)
+		if index < 2:
+			box = _connected_ink_box(image, box, _is_pen_ink)
+			crop = _clean_signature_image(image.crop(box))
+			crops.append(_png_bytes_from_image(_tight_content_crop(crop)))
+			continue
+		else:
+			search = (
+				max(0, box[0]),
+				max(0, box[1] - 20),
+				min(image.width, box[2] + 36),
+				min(image.height, box[3] + 36),
+			)
+			box = _bbox_matching(image, search, _is_stamp_ink)
+			box = (
+				max(0, box[0] - 6),
+				max(0, box[1] - 16),
+				min(image.width, box[2] + 18),
+				min(image.height, box[3] + 18),
+			)
+		crops.append(_png_bytes_from_image(image.crop(box)))
+	return crops
+
+
+def _raw_sheet_crops(path: str) -> list[bytes]:
+	"""Unmodified sign-off images from the signed payroll file, left to right."""
+	if not path or not str(path).lower().endswith(".pdf"):
+		return []
+	from pypdf import PdfReader
+
+	try:
+		reader = PdfReader(path)
+		if not reader.pages:
+			return []
+		page = reader.pages[0]
+		scan_crops = _scan_signoff_crops(page)
+		if len(scan_crops) >= 2:
+			return scan_crops
+		page_width = float(page.mediabox.width)
+		page_height = float(page.mediabox.height)
+		chunks = _pdf_text_chunks(page)
+		headings = _heading_markers(chunks)
+		images = _placed_images(page)
+		large = [image for image in images if image["w"] >= page_width * 0.55]
+		if headings and large:
+			crops = []
+			for heading in headings:
+				blob = _crop_column_signature(large[0], heading, headings, page_width, page_height)
+				if blob:
+					crops.append(blob)
+			if crops:
+				return crops
+		small = [image for image in images if image["w"] < page_width * 0.45 and image["h"] < page_height * 0.4]
+		return [image["blob"] for image in sorted(small, key=lambda image: image["x"])[:3]]
+	except Exception:
+		frappe.log_error(title="Payslip signed payroll crops")
+		return []
+
+
+def _request_sheet_crops(doc) -> list[bytes]:
+	for upload in _signed_payroll_uploads(doc):
+		path = _file_path(upload.signed_payroll)
+		if not path:
+			continue
+		if str(path).lower().endswith(".pdf"):
+			crops = _raw_sheet_crops(path)
+			if crops:
+				return crops
+		footer = _footer_signatures(upload.payroll_sheet_footer)
+		try:
+			found = _signatories_from_file(path, footer)
+		except Exception:
+			frappe.log_error(title="Payslip signed payroll images")
+			continue
+		blobs = [item.get("blob") for item in found if item.get("blob")]
+		if blobs:
+			return blobs
+	return []
+
+
+def _set_block_image(block: dict, blob: bytes, prefix: str) -> None:
+	path = _write_png(_png_bytes(blob), prefix)
+	block["image_path"] = path
+	block["image_url"] = None
+
+
+def _apply_sheet_signatures(doc, verified: dict | None, approved: dict | None) -> None:
+	"""Copy the signed-payroll signature images as they are, in sheet order."""
+	crops = _request_sheet_crops(doc)
+	if not crops:
+		return
+	if verified and len(crops) >= 1:
+		_set_block_image(verified, crops[0], "payslip-hr-sign")
+	if approved and len(crops) >= 2:
+		_set_block_image(approved, crops[1], "payslip-daf-sign")
+
+
+def _cachet_from_blob(blob: bytes) -> bytes | None:
+	"""Keep the full cachet. Fill Test-3 pen with nearby stamp colour, never white."""
+	import io
+
+	from PIL import Image
+
+	try:
+		image = Image.open(io.BytesIO(blob))
+	except Exception:
+		return None
+	width, height = image.size
+	if width < 8 or height < 8:
+		return None
+	if image.mode != "RGB":
+		image = image.convert("RGB")
+	pixels = image.load()
+
+	def is_dark_pen(red: int, green: int, blue: int) -> bool:
+		luma = 0.299 * red + 0.587 * green + 0.114 * blue
+		return luma < 148 and blue >= red + 18 and blue >= green + 10 and green < 170 and red < 165
+
+	pen = [[is_dark_pen(*pixels[x, y]) for x in range(width)] for y in range(height)]
+	for y in range(height):
+		for x in range(width):
+			if not pen[y][x]:
+				continue
+			samples = []
+			for dy in range(-5, 6):
+				for dx in range(-5, 6):
+					nx, ny = x + dx, y + dy
+					if 0 <= nx < width and 0 <= ny < height and not pen[ny][nx]:
+						samples.append(pixels[nx, ny])
+			if samples:
+				pixels[x, y] = tuple(sum(channel[i] for channel in samples) // len(samples) for i in range(3))
+	return _png_bytes_from_image(image)
+
+
+def _png_bytes_from_image(image) -> bytes:
+	import io
+
+	if image.mode not in ("RGB", "RGBA"):
+		image = image.convert("RGB")
+	buffer = io.BytesIO()
+	image.save(buffer, format="PNG")
+	return buffer.getvalue()
+
+
+def user_can_manage_cachet(user: str | None = None) -> bool:
+	from hrms.payroll.payroll_import.payroll_access import HR_PAYROLL_ROLES
+
+	user = user or frappe.session.user
+	if user in ("Guest",):
+		return False
+	if user == "Administrator":
+		return True
+	return bool(HR_PAYROLL_ROLES & set(frappe.get_roles(user)))
+
+
+def _throw_if_cannot_manage_cachet() -> None:
+	if not user_can_manage_cachet():
+		frappe.throw(_("Only HR can add the payslip cachet."), frappe.PermissionError)
+
+
+def get_payroll_cachet_path() -> str | None:
+	"""Stamp uploaded with Add Cachet, not a crop from the signed payroll scan."""
+	url = None
+	if frappe.get_meta("Payroll Settings").has_field("payroll_cachet"):
+		url = frappe.db.get_single_value("Payroll Settings", "payroll_cachet")
+	path = signature_image_path(url) if url else None
+	if path:
+		return path
+	rows = frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": "Payroll Settings"},
+		fields=["file_url", "file_name"],
+		order_by="modified desc",
+		limit=20,
+	)
+	for row in rows:
+		label = f"{row.file_name or ''} {row.file_url or ''}".lower()
+		if "cachet" in label or "stamp" in label:
+			path = signature_image_path(row.file_url)
+			if path:
+				return path
+	return None
+
+
+@frappe.whitelist()
+def save_payroll_cachet(file_url: str):
+	"""Attach an uploaded stamp and use it on approved / downloadable payslips."""
+	_throw_if_cannot_manage_cachet()
+	file_url = (file_url or "").strip()
+	if not file_url:
+		frappe.throw(_("Please choose a cachet image."))
+	file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
+	if not file_name:
+		frappe.throw(_("Could not find the uploaded cachet file."))
+	file_doc = frappe.get_doc("File", file_name)
+	old = frappe.get_all(
+		"File",
+		filters={
+			"attached_to_doctype": "Payroll Settings",
+			"attached_to_name": "Payroll Settings",
+			"name": ["!=", file_doc.name],
+		},
+		pluck="name",
+	)
+	for name in old:
+		label = (frappe.db.get_value("File", name, "file_name") or "").lower()
+		if "cachet" in label or "stamp" in label or (
+			frappe.get_meta("Payroll Settings").has_field("payroll_cachet")
+			and frappe.db.get_value("File", name, "attached_to_field") == "payroll_cachet"
+		):
+			frappe.delete_doc("File", name, ignore_permissions=True, force=1)
+	file_doc.attached_to_doctype = "Payroll Settings"
+	file_doc.attached_to_name = "Payroll Settings"
+	file_doc.attached_to_field = "payroll_cachet"
+	file_doc.file_name = file_doc.file_name or "payroll-cachet.png"
+	if "cachet" not in (file_doc.file_name or "").lower():
+		base, ext = os.path.splitext(file_doc.file_name)
+		file_doc.file_name = f"payroll-cachet{ext or '.png'}"
+	file_doc.flags.ignore_permissions = True
+	file_doc.save()
+	if frappe.get_meta("Payroll Settings").has_field("payroll_cachet"):
+		frappe.db.set_value(
+			"Payroll Settings",
+			"Payroll Settings",
+			"payroll_cachet",
+			file_doc.file_url,
+			update_modified=False,
+		)
+	return {"file_url": file_doc.file_url, "file_name": file_doc.file_name}
+
+
+def _cachet_block(doc) -> dict | None:
+	"""Company cachet from Add Cachet, used on preview, approval, and download."""
+	path = get_payroll_cachet_path()
+	if not path:
+		return None
+	return {
+		"heading": "",
+		"name": "",
+		"title": "",
+		"approved_on": "",
+		"image_path": path,
+		"is_cachet": True,
+	}
+
+
 def _store_user_signature(user: str, png: bytes, title: str | None) -> None:
 	file_name = f"{frappe.scrub(user)}-payroll-signature.png"
 	existing = frappe.db.get_value(
@@ -522,12 +1013,31 @@ def _apply_signature_from_signed_payroll(user: str, request, prefer: str | None)
 def signature_image_path(file_url: str | None) -> str | None:
 	if not file_url:
 		return None
+	file_url = str(file_url).strip()
 	file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
 	if not file_name:
-		return None
-	path = frappe.get_doc("File", file_name).get_full_path()
-	if path and os.path.exists(path):
-		return path
+		base = os.path.basename(file_url.split("?", 1)[0])
+		if base:
+			file_name = frappe.db.get_value("File", {"file_name": base}, "name")
+	if file_name:
+		path = frappe.get_doc("File", file_name).get_full_path()
+		if path and os.path.exists(path):
+			return path
+		rooted = os.path.abspath(os.path.join(frappe.utils.get_bench_path(), "sites", str(path or "").lstrip("./")))
+		if os.path.exists(rooted):
+			return rooted
+
+	rel = file_url.split("?", 1)[0].lstrip("/")
+	base = os.path.basename(rel)
+	candidates = [
+		frappe.get_site_path("public", rel),
+		frappe.get_site_path("private", "files", base),
+		frappe.get_site_path("public", "files", base),
+		os.path.join(frappe.utils.get_site_path(), rel),
+	]
+	for path in candidates:
+		if path and os.path.exists(path):
+			return path
 	return None
 
 
@@ -543,17 +1053,47 @@ def _block(user: str | None, approved_on, heading: str) -> dict | None:
 	when = ""
 	if approved_on:
 		when = format_datetime(approved_on, "dd MMM yyyy, HH:mm")
+	image_url = row.get("payroll_signature")
+	image_path = signature_image_path(image_url)
+	if not image_path:
+		attached = frappe.get_all(
+			"File",
+			filters={"attached_to_doctype": "User", "attached_to_name": user},
+			fields=["file_url", "file_name"],
+			order_by="creation desc",
+			limit=20,
+		)
+		for item in attached:
+			label = f"{item.file_name or ''} {item.file_url or ''}".lower()
+			if "sign" in label or "payroll" in label:
+				image_path = signature_image_path(item.file_url)
+				if image_path:
+					image_url = item.file_url
+					break
+	if image_path and not image_url:
+		image_url = row.get("payroll_signature")
+	if not image_path:
+		image_url = None
+	elif os.path.exists(image_path):
+		try:
+			from PIL import Image
+
+			tight = _tight_content_crop(Image.open(image_path))
+			image_path = _write_png(_png_bytes_from_image(tight), "payslip-sign")
+		except Exception:
+			pass
 	return {
 		"heading": heading,
 		"name": row.get("full_name") or user,
 		"title": row.get("payroll_signatory_title") or "",
 		"approved_on": when,
-		"image_path": signature_image_path(row.get("payroll_signature")),
+		"image_path": image_path,
+		"image_url": image_url,
 	}
 
 
 def signoff_for_request(doc) -> dict | None:
-	"""Verified-by (HR) and Approved-by (DAF) blocks for the payslip document."""
+	"""Verified-by (HR) and Approved-by (DAF), plus the sheet cachet without a third person."""
 	verified_user = doc.hr_approved_by
 	verified_on = doc.hr_approved_on
 	approved_user = doc.daf_approved_by
@@ -563,6 +1103,8 @@ def signoff_for_request(doc) -> dict | None:
 		verified_on = doc.approved_on
 	verified = _block(verified_user, verified_on, "Verified by")
 	approved = _block(approved_user, approved_on, "Approved by")
+	_apply_sheet_signatures(doc, verified, approved)
+	cachet = _cachet_block(doc)
 	if not verified and not approved:
 		return None
-	return {"verified_by": verified, "approved_by": approved}
+	return {"verified_by": verified, "approved_by": approved, "cachet": cachet}

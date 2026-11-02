@@ -171,28 +171,41 @@ frappe.ui.form.on("Payslip Request", {
 			}).addClass("btn-primary");
 		}
 
+		if (
+			((is_hr || is_daf) && ["Pending HR", "Pending DAF", "Pending"].includes(frm.doc.status)) ||
+			frm.doc.status === "Approved"
+		) {
+			frm.add_custom_button(__("Preview Payslip"), () => {
+				payslip_open_preview(frm);
+			});
+		}
+
 		if (is_hr && (frm.doc.status === "Pending HR" || frm.doc.status === "Pending")) {
 			frm.add_custom_button(__("Approve"), () => {
-				frappe.call({
-					method: "hrms.payroll.doctype.payslip_request.payslip_request.approve_payslip_request",
-					args: { docname: frm.doc.name },
-					freeze: true,
-					callback() {
-						frm.reload_doc();
-					},
+				payslip_open_preview(frm, () => {
+					frappe.call({
+						method: "hrms.payroll.doctype.payslip_request.payslip_request.approve_payslip_request",
+						args: { docname: frm.doc.name },
+						freeze: true,
+						callback() {
+							frm.reload_doc();
+						},
+					});
 				});
 			}).addClass("btn-primary");
 		}
 
 		if (is_daf && frm.doc.status === "Pending DAF") {
 			frm.add_custom_button(__("Approve"), () => {
-				frappe.call({
-					method: "hrms.payroll.doctype.payslip_request.payslip_request.daf_approve_payslip_request",
-					args: { docname: frm.doc.name },
-					freeze: true,
-					callback() {
-						frm.reload_doc();
-					},
+				payslip_open_preview(frm, () => {
+					frappe.call({
+						method: "hrms.payroll.doctype.payslip_request.payslip_request.daf_approve_payslip_request",
+						args: { docname: frm.doc.name },
+						freeze: true,
+						callback() {
+							frm.reload_doc();
+						},
+					});
 				});
 			}).addClass("btn-primary");
 		}
@@ -229,6 +242,12 @@ frappe.ui.form.on("Payslip Request", {
 			});
 		}
 
+		if (is_hr) {
+			frm.add_custom_button(__("Add Cachet"), () => {
+				hrms.payroll.add_cachet();
+			});
+		}
+
 		if (frm.doc.status === "Approved") {
 			frm.add_custom_button(__("Download Payslip"), () => {
 				const qs = new URLSearchParams({ docname: frm.doc.name });
@@ -257,3 +276,171 @@ frappe.ui.form.on("Payslip Request", {
 	to_year: payslip_sync_range,
 	to_month_name: payslip_sync_range,
 });
+
+function payslip_escape(value) {
+	return frappe.utils.escape_html(value == null ? "" : String(value));
+}
+
+function payslip_file_src(url) {
+	if (!url) {
+		return "";
+	}
+	const value = String(url);
+	if (value.startsWith("data:") || value.startsWith("http://") || value.startsWith("https://")) {
+		return value;
+	}
+	return frappe.urllib.get_full_url(value);
+}
+
+function payslip_sign_block(block) {
+	block = block || {};
+	const src = payslip_file_src(block.image_data_uri || block.image_url);
+	const img = src
+		? `<img src="${payslip_escape(src)}" alt="signature" style="max-height:82px;width:auto;max-width:100%;object-fit:contain;object-position:left center;display:block;">`
+		: "";
+	const when = block.approved_on ? `Approved on ${payslip_escape(block.approved_on)}` : "";
+	return `
+		<td style="border:0;vertical-align:top;padding:0 18px 0 0;">
+			<div style="font-weight:700;min-height:18px;">${payslip_escape(block.heading || "")}</div>
+			<div style="font-weight:700;min-height:18px;">${payslip_escape(block.name || "")}</div>
+			<div style="font-size:10pt;min-height:28px;margin-top:1px;">${payslip_escape(block.title || "")}</div>
+			<div style="height:86px;margin:6px 0 4px;">${img}</div>
+			<div style="font-size:10pt;min-height:16px;">${when}</div>
+		</td>
+	`;
+}
+
+function payslip_preview_html(data) {
+	const include_ict = Boolean(data.include_ict);
+	const earning_labels = [
+		"Pay Period",
+		"Payment Date",
+		"Basic Salary",
+		"Transport allowance",
+		"TC Allowance",
+	];
+	if (include_ict) {
+		earning_labels.push("ICT Allowance");
+	}
+	earning_labels.push("Bonus and other Incentives", "Gross Lumpsum", "Gross Salary");
+	const deduction_labels = ["PAYE", "Pension", "Maternity", "CBHI", "Other Deduction"];
+	const th_style =
+		"border:1px solid #000;padding:4px 3px;text-align:center;color:#000;font-weight:700;background:#ED7D31;";
+	const th_green =
+		"border:1px solid #000;padding:4px 3px;text-align:center;color:#000;font-weight:700;background:#00B050;";
+	const td_style = "border:1px solid #000;padding:4px 3px;text-align:center;";
+	const head1 =
+		earning_labels
+			.map((label) => `<th rowspan="2" style="${th_style}">${payslip_escape(label)}</th>`)
+			.join("") +
+		`<th colspan="${deduction_labels.length}" style="${th_green}">DEDUCTIONS</th>` +
+		`<th rowspan="2" style="${th_green}">TOTAL Deductions</th>` +
+		`<th rowspan="2" style="${th_style}">NET SALARY</th>`;
+	const head2 = deduction_labels
+		.map((label) => `<th style="${th_green}">${payslip_escape(label)}</th>`)
+		.join("");
+	const rows = (data.rows || [])
+		.map(
+			(row) =>
+				`<tr>${(row || [])
+					.map((cell) => `<td style="${td_style}">${payslip_escape(cell)}</td>`)
+					.join("")}</tr>`
+		)
+		.join("");
+	const logo_src = payslip_file_src(data.logo_url);
+	const photo_src = payslip_file_src(data.photo_url);
+	const signoff = data.signoff || {};
+	const sign_blocks = ["verified_by", "approved_by"]
+		.map((key) => {
+			const block = signoff[key];
+			if (!block || !(block.name || block.image_data_uri || block.image_url)) {
+				return "";
+			}
+			if (!block.heading) {
+				block.heading = key === "verified_by" ? "Verified by" : "Approved by";
+			}
+			return payslip_sign_block(block);
+		})
+		.join("");
+	const cachet = signoff.cachet || {};
+	const cachet_src = payslip_file_src(cachet.image_data_uri || cachet.image_url);
+	const cachet_cell = cachet_src
+		? `<td class="cachet" style="border:0;text-align:right;vertical-align:top;padding:0;width:32%;">
+			<div style="min-height:18px;">&nbsp;</div>
+			<div style="min-height:18px;">&nbsp;</div>
+			<div style="min-height:28px;">&nbsp;</div>
+			<div style="height:145px;margin:6px 0 4px;">
+				<img src="${payslip_escape(cachet_src)}" alt="cachet" style="height:140px;width:auto;max-width:100%;object-fit:contain;">
+			</div>
+		</td>`
+		: "";
+	return `
+		<div class="payslip-sheet" style="font-family:Calibri,Arial,sans-serif;color:#111;background:#fff;padding:10px 8px;">
+			<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+				<div>${
+					logo_src
+						? `<img src="${payslip_escape(logo_src)}" alt="logo" style="max-height:70px;max-width:220px;">`
+						: ""
+				}</div>
+				<div>${
+					photo_src
+						? `<img src="${payslip_escape(photo_src)}" alt="employee" style="max-height:86px;max-width:86px;object-fit:cover;">`
+						: ""
+				}</div>
+			</div>
+			<div style="text-align:center;font-weight:700;text-decoration:underline;letter-spacing:1px;margin:2px 0 8px;">PAYSLIP</div>
+			<div style="font-size:11px;line-height:1.4;margin:6px 0 10px;">
+				<div><strong>EMPLOYEE NAMES:</strong> ${payslip_escape(data.employee_name)}</div>
+				<div><strong>POSITION:</strong> ${payslip_escape(data.position)}</div>
+				<div><strong>DEPARTMENT:</strong> ${payslip_escape(data.department)}</div>
+				<div><strong>ACCOUNT NUMBER:</strong> ${payslip_escape(data.account_number)}</div>
+				<div><strong>BENEFICIARY BANK:</strong> ${payslip_escape(data.bank)}</div>
+			</div>
+			<div style="overflow-x:auto;">
+				<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8pt;">
+					<thead><tr>${head1}</tr><tr>${head2}</tr></thead>
+					<tbody>${rows}</tbody>
+				</table>
+			</div>
+			<div style="font-weight:700;margin:18px 0 10px;">For MUGANGA SACCO</div>
+			<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11pt;">
+				<tr>${sign_blocks}${cachet_cell}</tr>
+			</table>
+		</div>
+	`;
+}
+
+function payslip_open_preview(frm, on_approve) {
+	frappe.call({
+		method: "hrms.payroll.doctype.payslip_request.payslip_request.preview_payslip_for_request",
+		args: { docname: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Loading payslip preview"),
+		callback(r) {
+			const dialog = new frappe.ui.Dialog({
+				title: on_approve ? __("Preview payslip before approval") : __("Payslip Preview"),
+				size: "extra-large",
+				fields: [{ fieldtype: "HTML", fieldname: "preview" }],
+				primary_action_label: on_approve ? __("Approve") : __("Close"),
+				primary_action() {
+					dialog.hide();
+					if (on_approve) {
+						on_approve();
+					}
+				},
+			});
+			if (on_approve) {
+				dialog.set_secondary_action_label(__("Cancel"));
+				dialog.set_secondary_action(() => dialog.hide());
+			}
+			dialog.fields_dict.preview.$wrapper.css({
+				overflow: "auto",
+				background: "#fff",
+				maxHeight: "75vh",
+			});
+			const data = r.message || {};
+			dialog.fields_dict.preview.$wrapper.html(data.html || payslip_preview_html(data));
+			dialog.show();
+		},
+	});
+}

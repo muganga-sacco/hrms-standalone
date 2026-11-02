@@ -14,6 +14,9 @@ from hrms.payroll.payroll_import.payroll_access import (
 
 def extend_bootinfo(bootinfo) -> None:
 	"""Send employees to My Payslips; payroll viewers keep HR app default."""
+	from hrms.payroll.payroll_import.payroll_signoff import user_can_manage_cachet
+
+	bootinfo["hrms_can_add_cachet"] = bool(user_can_manage_cachet())
 	if frappe.session.user in ("Guest", "Administrator"):
 		return
 

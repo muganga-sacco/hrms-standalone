@@ -41,11 +41,11 @@ def _send_payslip_docx_response(
 	payroll_month: str | None = None,
 	signoff: dict | None = None,
 ):
-	from hrms.payroll.payroll_import.payslip_docx import build_payslip_docx
+	from hrms.payroll.payroll_import.payslip_docx import build_payslip_pdf
 
 	employee_id_number = normalize_employee_id_number(employee_id_number)
 	try:
-		content = build_payslip_docx(
+		content = build_payslip_pdf(
 			employee_id_number,
 			months=int(months) if months else 3,
 			from_month=from_month,
@@ -64,7 +64,7 @@ def _send_payslip_docx_response(
 	elif months:
 		suffix += f"_{int(months)}m"
 
-	frappe.local.response.filename = f"Payslip_{suffix}.docx"
+	frappe.local.response.filename = f"Payslip_{suffix}.pdf"
 	frappe.local.response.filecontent = content
 	frappe.local.response.type = "download"
 
