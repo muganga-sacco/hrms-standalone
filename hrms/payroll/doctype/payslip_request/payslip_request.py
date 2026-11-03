@@ -389,6 +389,10 @@ def submit_payslip_request(docname: str):
 
 	frappe.db.commit()
 
+	from hrms.payroll.payroll_import.payslip_request_email import notify_pending_hr
+
+	notify_pending_hr(doc)
+
 	return {"status": doc.status}
 
 
@@ -428,6 +432,10 @@ def approve_payslip_request(docname: str):
 	doc.save(ignore_permissions=True)
 
 	frappe.db.commit()
+
+	from hrms.payroll.payroll_import.payslip_request_email import notify_pending_daf
+
+	notify_pending_daf(doc)
 
 	return {"status": doc.status}
 

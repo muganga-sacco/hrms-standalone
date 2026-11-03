@@ -58,13 +58,18 @@ hrms.payroll.add_cachet = function () {
 	input.click();
 };
 
+hrms.payroll.open_settings = function () {
+	frappe.set_route("Form", "Payroll Settings", "Payroll Settings");
+};
+
 $(document).on("app_ready", () => {
-	if (
-		hrms.payroll.can_add_cachet() &&
-		frappe.search &&
-		frappe.search.utils &&
-		frappe.search.utils.make_function_searchable
-	) {
+	if (!(frappe.search && frappe.search.utils && frappe.search.utils.make_function_searchable)) {
+		return;
+	}
+	if (hrms.payroll.can_add_cachet()) {
 		frappe.search.utils.make_function_searchable(hrms.payroll.add_cachet, __("Add Cachet"));
+	}
+	if (frappe.model && frappe.model.can_read && frappe.model.can_read("Payroll Settings")) {
+		frappe.search.utils.make_function_searchable(hrms.payroll.open_settings, __("Payroll Settings"));
 	}
 });

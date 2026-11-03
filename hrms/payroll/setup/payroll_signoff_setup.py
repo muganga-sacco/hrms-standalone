@@ -27,6 +27,42 @@ def ensure_payroll_signoff():
 					"insert_after": "payslip_cachet_section",
 					"description": "Company stamp used on approved payslips. Add it with the Add Cachet command.",
 				},
+				{
+					"fieldname": "payslip_email_section",
+					"label": "Payslip Request Emails",
+					"fieldtype": "Section Break",
+					"insert_after": "payroll_cachet",
+				},
+				{
+					"fieldname": "enable_payslip_request_emails",
+					"label": "Send payslip request emails",
+					"fieldtype": "Check",
+					"insert_after": "payslip_email_section",
+					"default": "1",
+					"description": "Email HR when a request is submitted, and email DAF when HR has approved.",
+				},
+				{
+					"fieldname": "payslip_email_account",
+					"label": "From Email Account",
+					"fieldtype": "Link",
+					"options": "Email Account",
+					"insert_after": "enable_payslip_request_emails",
+					"description": "Outgoing account used as From. SMTP host, From address, and app password are set on this Email Account (Desk → Email Account).",
+				},
+				{
+					"fieldname": "hr_payslip_notification_emails",
+					"label": "HR notification emails",
+					"fieldtype": "Small Text",
+					"insert_after": "payslip_email_account",
+					"description": "One or more addresses, comma or new line. If empty, all enabled users with role HR Manager or HR User are emailed.",
+				},
+				{
+					"fieldname": "daf_payslip_notification_emails",
+					"label": "DAF notification emails",
+					"fieldtype": "Small Text",
+					"insert_after": "hr_payslip_notification_emails",
+					"description": "One or more addresses, comma or new line. If empty, all enabled users with role DAF are emailed.",
+				},
 			],
 			"User": [
 				{

@@ -275,6 +275,38 @@ def _ensure_payslip_request_pending_badge() -> None:
 	)
 
 
+def _ensure_payroll_settings_link() -> None:
+	if not frappe.db.exists("Workspace", "Payroll"):
+		return
+	_ensure_workspace_page_link("Payroll", "Payroll Settings", "payroll-settings")
+	_insert_workspace_child(
+		"Workspace Shortcut",
+		"Payroll",
+		"shortcuts",
+		{
+			"type": "DocType",
+			"label": "Payroll Settings",
+			"link_to": "Payroll Settings",
+			"doc_view": "List",
+			"color": "Grey",
+		},
+		"Payroll Settings",
+	)
+	_insert_workspace_child(
+		"Workspace Link",
+		"Payroll",
+		"links",
+		{
+			"type": "Link",
+			"label": "Payroll Settings",
+			"link_type": "DocType",
+			"link_to": "Payroll Settings",
+			"link_count": 0,
+		},
+		"Payroll Settings",
+	)
+
+
 def _ensure_workspace_page_link(workspace: str, label: str, page: str) -> None:
 	if not frappe.db.exists("Workspace", workspace):
 		return
@@ -346,6 +378,12 @@ def ensure_payroll_dashboard_permissions() -> dict:
 	payslip_self_service = _ensure_payslip_self_service_for_all_roles()
 	_ensure_variable_and_my_payroll_pages()
 	_ensure_payslip_request_pending_badge()
+	_ensure_payroll_settings_link()
+	_ensure_custom_docperm_flags("Payroll Settings", "HR Manager", {"read": 1, "write": 1, "print": 1, "email": 1})
+	_ensure_custom_docperm_flags("Payroll Settings", "HR User", {"read": 1, "write": 1, "print": 1, "email": 1})
+	_ensure_page_role("payroll-settings", "System Manager")
+	_ensure_page_role("payroll-settings", "HR Manager")
+	_ensure_page_role("payroll-settings", "HR User")
 
 	for doctype in doctype_read:
 		frappe.clear_cache(doctype=doctype)

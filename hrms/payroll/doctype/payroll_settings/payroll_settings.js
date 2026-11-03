@@ -10,11 +10,21 @@ frappe.ui.form.on('Payroll Settings', {
 				},
 			};
 		});
+		frm.set_query("payslip_email_account", () => {
+			return {
+				filters: {
+					enable_outgoing: 1,
+				},
+			};
+		});
 		if (frappe.boot.hrms_can_add_cachet) {
 			frm.add_custom_button(__("Add Cachet"), () => {
 				hrms.payroll.add_cachet();
 			});
 		}
+		frm.add_custom_button(__("Email Accounts"), () => {
+			frappe.set_route("List", "Email Account");
+		});
 	},
 
 	encrypt_salary_slips_in_emails: function(frm) {
