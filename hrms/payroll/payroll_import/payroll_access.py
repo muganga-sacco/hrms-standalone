@@ -1,0 +1,66 @@
+# Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
+# License: GNU General Public License v3. See license.txt
+
+from __future__ import annotations
+
+import frappe
+from frappe import _
+
+HR_PAYROLL_ROLES = frozenset({"HR Manager", "HR User"})
+PAYROLL_DASHBOARD_VIEW_ROLES = frozenset({"DAF", "MD"})
+PAYSLIP_REQUEST_ALL_ROLES = frozenset({"HR Manager", "HR User", "DAF", "MD"})
+# Payslip self-service is not limited to Employee / Requester — any logged-in user (see user_can_request_own_payslip).
+
+
+def user_has_hr_payroll_access(user: str | None = None) -> bool:
+	user = user or frappe.session.user
+	if user == "Guest":
+		return False
+	if user == "Administrator":
+		return True
+	return bool(HR_PAYROLL_ROLES & set(frappe.get_roles(user)))
+
+
+def user_can_see_all_payslip_requests(user: str | None = None) -> bool:
+	"""HR, DAF, MD, and Administrator see every payslip request. Other staff see only their own."""
+	user = user or frappe.session.user
+	if user == "Guest":
+		return False
+	if user == "Administrator":
+		return True
+	return bool(PAYSLIP_REQUEST_ALL_ROLES & set(frappe.get_roles(user)))
+
+
+def user_can_view_staff_payroll_dashboard(user: str | None = None) -> bool:
+	if user_has_hr_payroll_access(user):
+		return True
+	user = user or frappe.session.user
+	if user == "Guest":
+		return False
+	return bool(PAYROLL_DASHBOARD_VIEW_ROLES & set(frappe.get_roles(user)))
+
+
+def throw_if_not_hr_payroll(message: str | None = None) -> None:
+	if not user_has_hr_payroll_access():
+		frappe.throw(
+			message or _("Only HR staff can access payroll data."),
+			frappe.PermissionError,
+		)
+
+
+def throw_if_not_payroll_dashboard_viewer(message: str | None = None) -> None:
+	if not user_can_view_staff_payroll_dashboard():
+		frappe.throw(
+			message or _("You are not allowed to view the Staff Payroll Dashboard."),
+			frappe.PermissionError,
+		)
+
+
+def get_logged_in_employee() -> str | None:
+	return frappe.db.get_value("Employee", {"user_id": frappe.session.user}, "name")
+
+
+def user_can_request_own_payslip(user: str | None = None) -> bool:
+	"""True for any logged-in user regardless of role name (Employee, Requester, custom HR roles, etc.)."""
+	user = user or frappe.session.user
+	return bool(user and user != "Guest")

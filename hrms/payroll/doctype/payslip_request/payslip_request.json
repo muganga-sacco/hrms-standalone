@@ -1,0 +1,280 @@
+{
+ "actions": [],
+ "autoname": "format:PR-REQ-{YYYY}-{#####}",
+ "creation": "2026-09-24 10:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "employee_id_number",
+  "company",
+  "column_break_1",
+  "status",
+  "section_break_period",
+  "period_type",
+  "months",
+  "payroll_year",
+  "payroll_month_name",
+  "payroll_month",
+  "from_month",
+  "to_year",
+  "to_month_name",
+  "to_month",
+  "section_break_hr",
+  "hr_approved_by",
+  "hr_approved_on",
+  "daf_approved_by",
+  "daf_approved_on",
+  "approved_by",
+  "approved_on",
+  "rejection_reason",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.employee_number",
+   "fieldname": "employee_id_number",
+   "fieldtype": "Data",
+   "label": "Employee Number",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nPending HR\nPending DAF\nApproved\nRejected",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "hidden": 1,
+   "label": "Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "hr_approved_by",
+   "fieldtype": "Link",
+   "label": "Verified By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "hr_approved_on",
+   "fieldtype": "Datetime",
+   "label": "HR Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "daf_approved_by",
+   "fieldtype": "Link",
+   "label": "DAF Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "daf_approved_on",
+   "fieldtype": "Datetime",
+   "label": "DAF Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_period",
+   "fieldtype": "Section Break",
+   "label": "Payslip Period"
+  },
+  {
+   "default": "From month \u2013 To month",
+   "fieldname": "period_type",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Period Type",
+   "options": "Last 3 months\nSingle payroll month\nFrom month \u2013 To month",
+   "reqd": 1
+  },
+  {
+   "default": "3",
+   "fieldname": "months",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Number of Months"
+  },
+  {
+   "fieldname": "payroll_year",
+   "fieldtype": "Select",
+   "label": "Year",
+   "options": "2024\n2025\n2026\n2027\n2028"
+  },
+  {
+   "fieldname": "payroll_month_name",
+   "fieldtype": "Select",
+   "label": "Month",
+   "options": "January\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember"
+  },
+  {
+   "fieldname": "payroll_month",
+   "fieldtype": "Date",
+   "hidden": 1,
+   "label": "Payroll Month"
+  },
+  {
+   "fieldname": "from_month",
+   "fieldtype": "Date",
+   "hidden": 1,
+   "label": "From Month"
+  },
+  {
+   "fieldname": "to_year",
+   "fieldtype": "Select",
+   "label": "To Year",
+   "options": "2024\n2025\n2026\n2027\n2028"
+  },
+  {
+   "fieldname": "to_month_name",
+   "fieldtype": "Select",
+   "label": "To Month",
+   "options": "January\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember"
+  },
+  {
+   "fieldname": "to_month",
+   "fieldtype": "Date",
+   "hidden": 1,
+   "label": "To Month"
+  },
+  {
+   "fieldname": "section_break_hr",
+   "fieldtype": "Section Break",
+   "label": "HR Review"
+  },
+  {
+   "depends_on": "eval:doc.status==\"Rejected\"",
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Employee Remarks"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-01 22:55:00.000000",
+ "modified_by": "Administrator",
+ "module": "Payroll",
+ "name": "Payslip Request",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Employee",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "DAF",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "MD",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

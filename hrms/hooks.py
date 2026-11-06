@@ -39,11 +39,19 @@ app_include_css = "hrms.bundle.css"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {
-#     "Company": "public/js/erpnext/company.js",
-#     "Department": "public/js/erpnext/department.js",
-#     "Timesheet": "public/js/erpnext/timesheet.js",
-# }
+doctype_js = {
+	"Employee": "payroll/payroll_import/employee_payroll_id.js",
+	"Imported Payroll Record": "payroll/doctype/imported_payroll_record/imported_payroll_record_api.js",
+}
+doctype_list_js = {
+	"Payslip Request": "payroll/doctype/payslip_request/payslip_request_list.js",
+}
+permission_query_conditions = {
+	"Payslip Request": "hrms.payroll.doctype.payslip_request.payslip_request.get_permission_query_conditions",
+}
+has_permission = {
+	"Payslip Request": "hrms.payroll.doctype.payslip_request.payslip_request.has_permission",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -55,9 +63,11 @@ app_include_css = "hrms.bundle.css"
 # home_page = "login"
 
 # website user home page (by Role)
-# role_home_page = {
-# 	"Role": "home_page"
-# }
+role_home_page = {
+	"Employee": "My Payslips",
+}
+
+extend_bootinfo = "hrms.payroll.payroll_import.payroll_boot.extend_bootinfo"
 
 calendars = ["Leave Application"]
 
@@ -85,7 +95,12 @@ jinja = {
 
 # before_install = "hrms.install.before_install"
 after_install = "hrms.install.after_install"
-after_migrate = "basic.setup.update_select_perm_after_install"
+after_migrate = [
+	"basic.setup.update_select_perm_after_install",
+	"hrms.payroll.setup.ensure_payroll_dashboard_permissions.ensure_payroll_dashboard_permissions",
+	"hrms.payroll.payroll_import.employee_id_setup.ensure_employee_id_field",
+	"hrms.payroll.setup.payroll_signoff_setup.ensure_payroll_signoff",
+]
 
 # Uninstallation
 # ------------
@@ -159,10 +174,14 @@ doc_events = {
     },
     "Timesheet": {"validate": "hrms.hr.utils.validate_active_employee"},
     "Employee": {
-        "validate": "hrms.overrides.employee_master.validate_onboarding_process",
+        "validate": [
+            "hrms.overrides.employee_master.validate_onboarding_process",
+            "hrms.payroll.payroll_import.payroll_employee_link.validate_unique_payroll_id",
+        ],
         "on_update": [
             "hrms.overrides.employee_master.update_approver_role",
             "hrms.overrides.employee_master.publish_update",
+            "hrms.payroll.payroll_import.payroll_employee_link.on_employee_payroll_id_update",
         ],
         "after_insert": "hrms.overrides.employee_master.update_job_applicant_and_offer",
         "on_trash": "hrms.overrides.employee_master.update_employee_transfer",

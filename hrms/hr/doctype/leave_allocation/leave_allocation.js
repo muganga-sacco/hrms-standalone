@@ -5,7 +5,6 @@ cur_frm.add_fetch('employee', 'employee_name', 'employee_name');
 
 frappe.ui.form.on('Leave Allocation', {
   onload: function (frm) {
-    // Ignore cancellation of doctype on cancel all.
     frm.ignore_doctypes_on_cancel_all = ['Leave Ledger Entry'];
 
     if (!frm.doc.from_date)
@@ -26,30 +25,68 @@ frappe.ui.form.on('Leave Allocation', {
   },
 
   refresh: function (frm) {
+    if (frm._base_total == null) {
+      frm._base_total = flt(frm.doc.total_leaves_allocated);
+    }
+    frm.set_df_property('unused_leaves', 'label', __('Closing Balance'));
+    ['unused_leaves', 'new_leaves_allocated', 'total_leaves_allocated'].forEach((fieldname) => {
+      frm.set_df_property(fieldname, 'description', '');
+      const field = frm.get_field(fieldname);
+      if (field && field.set_description) {
+        field.set_description('');
+      }
+    });
+    frm.set_intro();
+
+    if (frm.doc.docstatus === 1) {
+      frm.page.set_primary_action(__('Update extra days'), () => {
+        const extra = flt(frm.doc.new_leaves_allocated);
+        if (extra <= 0) {
+          frappe.msgprint(__('Type extra days in New Leaves Allocated first.'));
+          return;
+        }
+        frappe.call({
+          method: 'hrms.hr.add_leave_allocation_days.apply_extra_days',
+          args: { allocation_name: frm.doc.name, extra: extra },
+          freeze: true,
+          freeze_message: __('Adding extra days...'),
+          callback: function (r) {
+            if (r.message) {
+              frappe.show_alert({
+                message: __('Added {0} days. New grant is now {1}.', [
+                  extra,
+                  r.message.new_leaves_allocated,
+                ]),
+                indicator: 'green',
+              });
+              frm.reload_doc();
+            }
+          },
+        });
+      });
+    }
+
     if (frm.doc.docstatus === 1 && frm.doc.expired) {
       var valid_expiry = moment(frappe.datetime.get_today()).isBetween(
         frm.doc.from_date,
         frm.doc.to_date
       );
       if (valid_expiry) {
-        // expire current allocation
         frm.add_custom_button(__('Expire Allocation'), function () {
           frm.trigger('expire_allocation');
         });
       }
     }
 
-    if (!frm.doc.__islocal && frm.doc.leave_policy_assignment) {
-      frappe.db.get_value(
-        'Leave Type',
-        frm.doc.leave_type,
-        'is_earned_leave',
-        (r) => {
-          if (cint(r?.is_earned_leave))
-            frm.set_df_property('new_leaves_allocated', 'read_only', 1);
-        }
-      );
-    }
+    frm.trigger('load_existing_allocation');
+  },
+
+  employee: function (frm) {
+    frm.trigger('load_existing_allocation');
+  },
+
+  leave_type: function (frm) {
+    frm.trigger('load_existing_allocation');
   },
 
   expire_allocation: function (frm) {
@@ -70,51 +107,116 @@ frappe.ui.form.on('Leave Allocation', {
     });
   },
 
-  employee: function (frm) {
-    frm.trigger('calculate_total_leaves_allocated');
-  },
-
-  leave_type: function (frm) {
-    frm.trigger('leave_policy');
-    frm.trigger('calculate_total_leaves_allocated');
-  },
-
   carry_forward: function (frm) {
     frm.trigger('calculate_total_leaves_allocated');
   },
 
   unused_leaves: function (frm) {
-    frm.set_value(
-      'total_leaves_allocated',
-      flt(frm.doc.unused_leaves) + flt(frm.doc.new_leaves_allocated)
-    );
+    frm.trigger('recalc_total_from_extra');
   },
 
   new_leaves_allocated: function (frm) {
-    frm.set_value(
-      'total_leaves_allocated',
-      flt(frm.doc.unused_leaves) + flt(frm.doc.new_leaves_allocated)
-    );
+    frm.trigger('recalc_total_from_extra');
   },
 
-  leave_policy: function (frm) {
-    if (frm.doc.leave_policy && frm.doc.leave_type) {
-      frappe.db.get_value(
-        'Leave Policy Detail',
-        {
-          parent: frm.doc.leave_policy,
-          leave_type: frm.doc.leave_type,
+  load_existing_allocation: function (frm) {
+    if (!frm.doc.employee || !frm.doc.leave_type) {
+      frm._existing_ctx = { name: null, unused: 0, opening: 0, ledger_new: 0, total: 0 };
+      if (frm.doc.__islocal) {
+        frm.doc.new_leaves_allocated = 0;
+        frm.doc.total_leaves_allocated = 0;
+        frm.refresh_field('new_leaves_allocated');
+        frm.refresh_field('total_leaves_allocated');
+      }
+      return;
+    }
+
+    frappe.call({
+      method: 'hrms.hr.add_leave_allocation_days.get_existing_allocation',
+      args: {
+        employee: frm.doc.employee,
+        leave_type: frm.doc.leave_type,
+        name: frm.doc.__islocal ? null : frm.doc.name,
+      },
+      callback: function (r) {
+        const ctx = r.message || {
+          name: null,
+          unused: 0,
+          opening: 0,
+          ledger_new: 0,
+          total: 0,
+        };
+        frm._existing_ctx = ctx;
+        frm._extra_mode = true;
+        frm._base_total = flt(ctx.ledger_new);
+
+        if (!frm.is_dirty()) {
+          frm.doc.new_leaves_allocated = 0;
+          frm.doc.total_leaves_allocated = frm._base_total;
+          frm.doc.unused_leaves = flt(ctx.opening || ctx.unused);
+          frm.refresh_field('new_leaves_allocated');
+          frm.refresh_field('total_leaves_allocated');
+          frm.refresh_field('unused_leaves');
+        } else {
+          frm.trigger('recalc_total_from_extra');
+        }
+
+        frm.set_intro();
+        if (!frm.doc.__unsaved) {
+          frm.dirty = false;
+        }
+      },
+    });
+  },
+
+  recalc_total_from_extra: function (frm) {
+    const extra = flt(frm.doc.new_leaves_allocated);
+    if (frm._base_total == null) {
+      frm._base_total = flt(frm.doc.total_leaves_allocated) - extra;
+    }
+    frm.doc.total_leaves_allocated = flt(frm._base_total) + extra;
+    frm.refresh_field('total_leaves_allocated');
+  },
+
+  before_save: function (frm) {
+    const extra = flt(frm.doc.new_leaves_allocated);
+    const ctx = frm._existing_ctx || {};
+
+    if (frm.doc.__islocal && ctx.name) {
+      if (extra <= 0) {
+        frappe.throw(__('Type extra days in New Leaves Allocated'));
+      }
+      frappe.validated = false;
+      frappe.call({
+        method: 'hrms.hr.add_leave_allocation_days.apply_extra_days',
+        args: { allocation_name: ctx.name, extra: extra },
+        freeze: true,
+        callback: function (r) {
+          if (r.message && r.message.name) {
+            frappe.show_alert({
+              message: __('Added {0} days on {1}', [extra, r.message.name]),
+              indicator: 'green',
+            });
+            frappe.set_route('Form', 'Leave Allocation', r.message.name);
+          }
         },
-        'annual_allocation',
-        (r) => {
-          if (r && !r.exc)
-            frm.set_value('new_leaves_allocated', flt(r.annual_allocation));
-        },
-        'Leave Policy'
-      );
+      });
+      return;
+    }
+
+    if (ctx.ledger_new != null) {
+      const stored = flt(ctx.ledger_new) + extra;
+      frm.doc.new_leaves_allocated = stored;
+      frm.doc.total_leaves_allocated =
+        flt(ctx.unused) + stored;
     }
   },
+
   calculate_total_leaves_allocated: function (frm) {
+    if (frm._extra_mode) {
+      frm.trigger('recalc_total_from_extra');
+      return;
+    }
     if (
       cint(frm.doc.carry_forward) == 1 &&
       frm.doc.leave_type &&
@@ -169,8 +271,6 @@ frappe.tour['Leave Allocation'] = [
   {
     fieldname: 'new_leaves_allocated',
     title: 'New Leaves Allocated',
-    description: __(
-      'Enter the number of leaves you want to allocate for the period.'
-    ),
+    description: __('Enter the number of leaves you want to allocate for the period.'),
   },
 ];

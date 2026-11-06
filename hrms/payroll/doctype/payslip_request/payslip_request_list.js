@@ -1,0 +1,16 @@
+// Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
+// License: GNU General Public License v3. See license.txt
+
+frappe.listview_settings["Payslip Request"] = {
+	get_indicator(doc) {
+		const colors = {
+			Draft: "gray",
+			"Pending HR": "orange",
+			"Pending DAF": "blue",
+			Pending: "orange",
+			Approved: "green",
+			Rejected: "red",
+		};
+		return [__(doc.status), colors[doc.status] || "gray", `status,=,${doc.status}`];
+	},
+};
