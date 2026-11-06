@@ -30,8 +30,8 @@ def run(
 	force: int | bool = 0,
 ) -> dict:
 	days = flt(days)
-	if days <= 0:
-		frappe.throw("days must be greater than 0")
+	if days == 0:
+		frappe.throw("days must not be 0")
 
 	year_start = getdate(f"{int(year)}-01-01")
 	year_end = getdate(f"{int(year)}-12-31")
@@ -56,6 +56,14 @@ def run(
 
 		existing = flt(doc.get_existing_leave_count(), doc.precision("new_leaves_allocated"))
 		target = flt(existing + days, doc.precision("new_leaves_allocated"))
+		if target < 0:
+			info = {
+				"allocation": doc.name,
+				"employee": doc.employee,
+				"skipped": f"would go below 0 (ledger {existing} {days})",
+			}
+			results.append(info)
+			continue
 		info = {
 			"allocation": doc.name,
 			"employee": doc.employee,
@@ -177,28 +185,64 @@ def _already_stamped(doc) -> bool:
 
 
 def _stamp_extra(doc, extra, existing, target) -> None:
-	note = f"{NOTE_MARKER} added {extra} on {frappe.utils.nowdate()} (ledger {existing} -> {target})"
+	verb = "removed" if extra < 0 else "added"
+	note = f"{NOTE_MARKER} {verb} {extra} on {frappe.utils.nowdate()} (ledger {existing} -> {target})"
 	doc.add_comment("Info", note)
 
 
 @frappe.whitelist()
-def apply_extra_days(allocation_name: str, extra: float) -> dict:
-	"""Add extra days on top of ledger New Leaves. Used by New Leave Allocation."""
+def apply_extra_days(
+	allocation_name: str | None = None,
+	extra: float | None = None,
+	employee: str | None = None,
+	leave_type: str | None = None,
+	days: float | None = None,
+	year: int | None = None,
+) -> dict:
+	"""Add or remove days on the existing grant (negative extra removes)."""
 	frappe.has_permission("Leave Allocation", "write", throw=True)
-	extra = flt(extra)
-	if extra <= 0:
-		frappe.throw(frappe._("Type extra days in New Leaves Allocated"))
+	delta = flt(extra if extra is not None else days)
+	if delta == 0:
+		frappe.throw(frappe._("Type days in New Leaves Allocated (positive to add, negative to remove)"))
+	if not allocation_name and employee:
+		ctx = get_existing_allocation(employee, leave_type or "Annual leave")
+		allocation_name = ctx.get("name")
+	if not allocation_name:
+		frappe.throw(frappe._("Leave Allocation is required"))
 	doc = frappe.get_doc("Leave Allocation", allocation_name)
 	existing = flt(doc.get_existing_leave_count(), doc.precision("new_leaves_allocated"))
-	doc.new_leaves_allocated = flt(existing + extra, doc.precision("new_leaves_allocated"))
-	_stamp_extra(doc, extra, existing, doc.new_leaves_allocated)
+	target = flt(existing + delta, doc.precision("new_leaves_allocated"))
+	if target < 0:
+		frappe.throw(
+			frappe._("Cannot reduce below 0. Existing grant is {0}.").format(existing)
+		)
+	doc.new_leaves_allocated = target
+	_stamp_extra(doc, delta, existing, doc.new_leaves_allocated)
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"name": doc.name,
 		"new_leaves_allocated": doc.new_leaves_allocated,
 		"total_leaves_allocated": doc.total_leaves_allocated,
-		"added": extra,
+		"existing_total": doc.new_leaves_allocated,
+		"added": delta,
+	}
+
+
+@frappe.whitelist()
+def get_allocation_summary(employee: str, leave_type: str | None = None, year: int | None = None) -> dict:
+	ctx = get_existing_allocation(employee, leave_type or "Annual leave")
+	if not ctx.get("name"):
+		return {"found": 0}
+	return {
+		"found": 1,
+		"allocation": ctx["name"],
+		"employee": ctx.get("employee") or employee,
+		"leave_type": ctx.get("leave_type") or leave_type,
+		"from_date": ctx.get("from_date"),
+		"to_date": ctx.get("to_date"),
+		"existing_total": ctx.get("ledger_new") or 0,
+		"unused_leaves": ctx.get("opening") or ctx.get("unused") or 0,
 	}
 
 

@@ -41,22 +41,27 @@ frappe.ui.form.on('Leave Allocation', {
     if (frm.doc.docstatus === 1) {
       frm.page.set_primary_action(__('Update extra days'), () => {
         const extra = flt(frm.doc.new_leaves_allocated);
-        if (extra <= 0) {
-          frappe.msgprint(__('Type extra days in New Leaves Allocated first.'));
+        if (extra === 0) {
+          frappe.msgprint(__('Type days in New Leaves Allocated (positive to add, negative to remove).'));
           return;
         }
         frappe.call({
           method: 'hrms.hr.add_leave_allocation_days.apply_extra_days',
           args: { allocation_name: frm.doc.name, extra: extra },
           freeze: true,
-          freeze_message: __('Adding extra days...'),
+          freeze_message: extra < 0 ? __('Removing days...') : __('Adding extra days...'),
           callback: function (r) {
             if (r.message) {
               frappe.show_alert({
-                message: __('Added {0} days. New grant is now {1}.', [
-                  extra,
-                  r.message.new_leaves_allocated,
-                ]),
+                message: extra < 0
+                  ? __('Removed {0} days. New grant is now {1}.', [
+                      Math.abs(extra),
+                      r.message.new_leaves_allocated,
+                    ])
+                  : __('Added {0} days. New grant is now {1}.', [
+                      extra,
+                      r.message.new_leaves_allocated,
+                    ]),
                 indicator: 'green',
               });
               frm.reload_doc();
@@ -183,8 +188,8 @@ frappe.ui.form.on('Leave Allocation', {
     const ctx = frm._existing_ctx || {};
 
     if (frm.doc.__islocal && ctx.name) {
-      if (extra <= 0) {
-        frappe.throw(__('Type extra days in New Leaves Allocated'));
+      if (extra === 0) {
+        frappe.throw(__('Type days in New Leaves Allocated (positive to add, negative to remove)'));
       }
       frappe.validated = false;
       frappe.call({
@@ -194,7 +199,9 @@ frappe.ui.form.on('Leave Allocation', {
         callback: function (r) {
           if (r.message && r.message.name) {
             frappe.show_alert({
-              message: __('Added {0} days on {1}', [extra, r.message.name]),
+              message: extra < 0
+                ? __('Removed {0} days on {1}', [Math.abs(extra), r.message.name])
+                : __('Added {0} days on {1}', [extra, r.message.name]),
               indicator: 'green',
             });
             frappe.set_route('Form', 'Leave Allocation', r.message.name);
