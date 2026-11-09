@@ -431,6 +431,7 @@ PAYSLIP_FIELDS = [
 	"payroll_month",
 	"payment_date",
 	"basic_salary",
+	"gross_bonus",
 	"transport_allowance",
 	"ict_allowance",
 	"itc_allowance",
@@ -735,6 +736,15 @@ def _apply_staff_record_to_merged(target: dict, record: dict) -> None:
 			target[field] = record.get(field)
 
 
+def _variable_bonus_amount(record: dict) -> float:
+	"""Bonus Excel: show Gross Bonus from Basic Salary, Gross Bonus, or that sheet's Gross Salary."""
+	for key in ("basic_salary", "gross_bonus", "gross_salary"):
+		amount = _flt(record.get(key))
+		if amount:
+			return amount
+	return 0.0
+
+
 def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> None:
 	"""Add bonuses and incentives the employee received in this month."""
 	if not variables:
@@ -748,12 +758,14 @@ def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> No
 	variable_net = 0.0
 	for record in variables:
 		# Basic salary on the payslip stays the staff figure.
-		# The variable sheet's Basic salary is the bonus column.
-		bonus_incentives += _flt(record.get("basic_salary"))
+		# Variable sheet: Bonus and other Incentives = Basic Salary, else Gross Bonus.
+		bonus_amount = _variable_bonus_amount(record)
+		bonus_incentives += bonus_amount
 		target["transport_allowance"] += _flt(record.get("transport_allowance"))
 		target["itc_allowance"] += _flt(record.get("itc_allowance"))
 		target["ict_allowance"] += _flt(record.get("ict_allowance"))
-		gross_variable += _flt(record.get("gross_salary"))
+		sheet_gross = _flt(record.get("gross_salary"))
+		gross_variable += sheet_gross if sheet_gross else bonus_amount
 		variable_net += _sheet_net_paid(record)
 		target["paye"] += _flt(record.get("paye"))
 		target["pension_employee"] += _flt(record.get("pension_employee"))

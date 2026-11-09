@@ -302,6 +302,7 @@ def _upsert_payroll_record(upload_doc, row: dict) -> int:
 			else None,
 			"payroll_excel_upload": upload_doc.name,
 			"basic_salary": row.get("basic_salary"),
+			"gross_bonus": row.get("gross_bonus"),
 			"transport_allowance": row.get("transport_allowance"),
 			"itc_allowance": row.get("itc_allowance"),
 			"ict_allowance": row.get("ict_allowance"),

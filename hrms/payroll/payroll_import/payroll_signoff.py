@@ -43,43 +43,50 @@ def throw_if_not_md(message: str | None = None) -> None:
 
 
 def approver_profile(user: str, request=None, prefer: str | None = None) -> dict:
-	"""Name, title, and signature from this user's Payroll Sign-off, not the sheet."""
+	"""Allow approve when this user has a Payroll Sign-off image or the month has a signed payroll."""
 	if not user:
 		frappe.throw(_("Approver is required."))
 	row = _user_signoff_row(user)
 	if row and row.payroll_signature:
 		return row
+	if request and _signed_payroll_uploads(request):
+		return row or {"full_name": frappe.db.get_value("User", user, "full_name") or user}
 	frappe.throw(
 		_("Upload your signature on your User profile (Payroll Sign-off) before approving.")
 	)
 
 
 def _latest_payroll_signature_url(user: str) -> str | None:
-	"""Newest image on User Payroll Sign-off, even if the User field still has an old URL."""
+	"""Newest Payroll Sign-off image for this user (by upload time), not an older file."""
 	if not user:
 		return None
-	field_url = frappe.db.get_value("User", user, "payroll_signature")
 	attached = frappe.get_all(
 		"File",
-		filters={"attached_to_doctype": "User", "attached_to_name": user},
-		fields=["file_url", "file_name", "attached_to_field", "modified", "creation"],
-		order_by="modified desc, creation desc",
-		limit=50,
+		filters={
+			"attached_to_doctype": "User",
+			"attached_to_name": user,
+			"attached_to_field": "payroll_signature",
+		},
+		fields=["name", "file_url", "creation"],
+		order_by="creation desc",
+		limit=20,
 	)
+	chosen = None
 	for item in attached:
-		if item.file_url and (item.attached_to_field or "") == "payroll_signature":
-			if item.file_url != field_url:
-				frappe.db.set_value(
-					"User", user, "payroll_signature", item.file_url, update_modified=False
-				)
-			return item.file_url
+		if item.file_url:
+			chosen = item
+			break
+	if not chosen:
+		return frappe.db.get_value("User", user, "payroll_signature")
+	field_url = frappe.db.get_value("User", user, "payroll_signature")
+	if chosen.file_url != field_url:
+		frappe.db.set_value(
+			"User", user, "payroll_signature", chosen.file_url, update_modified=False
+		)
 	for item in attached:
-		if not item.file_url:
-			continue
-		label = f"{item.file_name or ''} {item.file_url or ''}".lower()
-		if item.file_url == field_url or "sign" in label or "payroll" in label:
-			return item.file_url
-	return field_url or None
+		if item.name != chosen.name:
+			frappe.db.set_value("File", item.name, "attached_to_field", "", update_modified=False)
+	return chosen.file_url
 
 
 def _user_signoff_row(user: str):
@@ -832,7 +839,7 @@ def _colored_clusters(image, y_start: int, y_end: int) -> list[list]:
 	for y in range(max(0, y_start), min(image.height, y_end)):
 		for x in range(width):
 			red, green, blue = pixels[x, y]
-			if _is_pen_ink(red, green, blue) or _is_stamp_ink(red, green, blue):
+			if _is_pen_ink(red, green, blue):
 				points.append((x, y))
 	if len(points) < 40:
 		return []
@@ -859,7 +866,7 @@ def _scan_signoff_crops(page) -> list[bytes]:
 	if len(clusters) < 2:
 		return []
 	crops = []
-	for index, cluster in enumerate(clusters[:3]):
+	for cluster in clusters[:3]:
 		xs = [point[0] for point in cluster]
 		ys = [point[1] for point in cluster]
 		box = (
@@ -868,26 +875,9 @@ def _scan_signoff_crops(page) -> list[bytes]:
 			min(image.width, max(xs) + 8),
 			min(image.height, max(ys) + 8),
 		)
-		if index < 2:
-			box = _connected_ink_box(image, box, _is_pen_ink)
-			crop = _clean_signature_image(image.crop(box))
-			crops.append(_png_bytes_from_image(_tight_content_crop(crop)))
-			continue
-		else:
-			search = (
-				max(0, box[0]),
-				max(0, box[1] - 20),
-				min(image.width, box[2] + 36),
-				min(image.height, box[3] + 36),
-			)
-			box = _bbox_matching(image, search, _is_stamp_ink)
-			box = (
-				max(0, box[0] - 6),
-				max(0, box[1] - 16),
-				min(image.width, box[2] + 18),
-				min(image.height, box[3] + 18),
-			)
-		crops.append(_png_bytes_from_image(image.crop(box)))
+		box = _connected_ink_box(image, box, _is_pen_ink)
+		crop = _clean_signature_image(image.crop(box))
+		crops.append(_png_bytes_from_image(_tight_content_crop(crop)))
 	return crops
 
 
@@ -953,15 +943,27 @@ def _set_block_image(block: dict, blob: bytes, prefix: str) -> None:
 	block["image_url"] = None
 
 
-def _apply_sheet_signatures(doc, verified: dict | None, approved: dict | None) -> None:
-	"""Copy the signed-payroll signature images as they are, in sheet order."""
+def _apply_sheet_signatures(doc, verified: dict | None, approved: dict | None, flow: str = "Staff") -> None:
+	"""Stamp ink from the latest signed payroll PDF (Prepared / Verified / Approved)."""
 	crops = _request_sheet_crops(doc)
 	if not crops:
 		return
-	if verified and len(crops) >= 1:
-		_set_block_image(verified, crops[0], "payslip-hr-sign")
-	if approved and len(crops) >= 2:
-		_set_block_image(approved, crops[1], "payslip-daf-sign")
+	flow = (flow or "Staff").strip() or "Staff"
+	if len(crops) >= 3:
+		if flow == "HR":
+			verified_blob, approved_blob = crops[1], crops[2]
+		elif flow == "DAF":
+			verified_blob, approved_blob = crops[0], crops[2]
+		else:
+			verified_blob, approved_blob = crops[0], crops[1]
+	elif len(crops) >= 2:
+		verified_blob, approved_blob = crops[0], crops[1]
+	else:
+		verified_blob, approved_blob = crops[0], None
+	if verified and verified_blob:
+		_set_block_image(verified, verified_blob, "payslip-verified-sign")
+	if approved and approved_blob:
+		_set_block_image(approved, approved_blob, "payslip-approved-sign")
 
 
 def _cachet_from_blob(blob: bytes) -> bytes | None:
@@ -1174,10 +1176,6 @@ def signature_image_path(file_url: str | None) -> str | None:
 		return None
 	file_url = str(file_url).strip()
 	file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
-	if not file_name:
-		base = os.path.basename(file_url.split("?", 1)[0])
-		if base:
-			file_name = frappe.db.get_value("File", {"file_name": base}, "name")
 	if file_name:
 		path = frappe.get_doc("File", file_name).get_full_path()
 		if path and os.path.exists(path):
@@ -1187,14 +1185,10 @@ def signature_image_path(file_url: str | None) -> str | None:
 			return rooted
 
 	rel = file_url.split("?", 1)[0].lstrip("/")
-	base = os.path.basename(rel)
-	candidates = [
+	for path in (
 		frappe.get_site_path("public", rel),
-		frappe.get_site_path("private", "files", base),
-		frappe.get_site_path("public", "files", base),
 		os.path.join(frappe.utils.get_site_path(), rel),
-	]
-	for path in candidates:
+	):
 		if path and os.path.exists(path):
 			return path
 	return None
@@ -1247,6 +1241,7 @@ def signoff_for_request(doc) -> dict | None:
 		verified_on = doc.approved_on
 	verified = _block(verified_user, verified_on, "Verified by")
 	approved = _block(approved_user, approved_on, "Approved by")
+	_apply_sheet_signatures(doc, verified, approved, flow)
 	cachet = _cachet_block(doc)
 	if not verified and not approved:
 		return None
