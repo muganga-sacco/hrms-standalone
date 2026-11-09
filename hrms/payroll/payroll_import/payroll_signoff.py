@@ -54,13 +54,45 @@ def approver_profile(user: str, request=None, prefer: str | None = None) -> dict
 	)
 
 
+def _latest_payroll_signature_url(user: str) -> str | None:
+	"""Newest image on User Payroll Sign-off, even if the User field still has an old URL."""
+	if not user:
+		return None
+	field_url = frappe.db.get_value("User", user, "payroll_signature")
+	attached = frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": "User", "attached_to_name": user},
+		fields=["file_url", "file_name", "attached_to_field", "modified", "creation"],
+		order_by="modified desc, creation desc",
+		limit=50,
+	)
+	for item in attached:
+		if item.file_url and (item.attached_to_field or "") == "payroll_signature":
+			if item.file_url != field_url:
+				frappe.db.set_value(
+					"User", user, "payroll_signature", item.file_url, update_modified=False
+				)
+			return item.file_url
+	for item in attached:
+		if not item.file_url:
+			continue
+		label = f"{item.file_name or ''} {item.file_url or ''}".lower()
+		if item.file_url == field_url or "sign" in label or "payroll" in label:
+			return item.file_url
+	return field_url or None
+
+
 def _user_signoff_row(user: str):
-	return frappe.db.get_value(
+	row = frappe.db.get_value(
 		"User",
 		user,
 		["full_name", "payroll_signature", "payroll_signatory_title"],
 		as_dict=True,
 	)
+	if not row:
+		return row
+	row.payroll_signature = _latest_payroll_signature_url(user)
+	return row
 
 
 def _name_tokens(value: str | None) -> set[str]:
@@ -1171,32 +1203,12 @@ def signature_image_path(file_url: str | None) -> str | None:
 def _block(user: str | None, approved_on, heading: str) -> dict | None:
 	if not user:
 		return None
-	row = frappe.db.get_value(
-		"User",
-		user,
-		["full_name", "payroll_signature", "payroll_signatory_title"],
-		as_dict=True,
-	) or {}
+	row = _user_signoff_row(user) or {}
 	when = ""
 	if approved_on:
 		when = format_datetime(approved_on, "dd MMM yyyy, HH:mm")
 	image_url = row.get("payroll_signature")
 	image_path = signature_image_path(image_url)
-	if not image_path:
-		attached = frappe.get_all(
-			"File",
-			filters={"attached_to_doctype": "User", "attached_to_name": user},
-			fields=["file_url", "file_name"],
-			order_by="creation desc",
-			limit=20,
-		)
-		for item in attached:
-			label = f"{item.file_name or ''} {item.file_url or ''}".lower()
-			if "sign" in label or "payroll" in label:
-				image_path = signature_image_path(item.file_url)
-				if image_path:
-					image_url = item.file_url
-					break
 	if image_path and not image_url:
 		image_url = row.get("payroll_signature")
 	if not image_path:
