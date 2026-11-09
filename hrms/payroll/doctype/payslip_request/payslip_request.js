@@ -354,7 +354,7 @@ function payslip_preview_html(data) {
 		"Payment Date",
 		"Basic Salary",
 		"Transport allowance",
-		"TC Allowance",
+		"ITC Allowance",
 	];
 	if (include_ict) {
 		earning_labels.push("ICT Allowance");

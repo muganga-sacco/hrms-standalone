@@ -166,11 +166,13 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 				):
 					fallback_title = candidate
 		first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
-		if first_cell in ("S/N", "S/N ", "SN", "NAMES", "NAME", "#"):
+		if first_cell in ("S/N", "S/N ", "SN", "NAMES", "NAME", "#", "ID NUMBER", "EMPLOYEE ID"):
 			header_idx = idx
 			break
-		joined = " ".join(str(c or "").strip().upper() for c in row[:6])
-		if "NAMES" in joined and ("GROSS" in joined or "LUMPSUM" in joined or "DEPARTMENT" in joined):
+		joined = " ".join(str(c or "").strip().upper() for c in row[:8])
+		if ("NAMES" in joined or "ID NUMBER" in joined or "EMPLOYEE ID" in joined) and (
+			"GROSS" in joined or "LUMPSUM" in joined or "DEPARTMENT" in joined or "BASIC" in joined
+		):
 			header_idx = idx
 			break
 	if header_idx is None:
@@ -184,7 +186,7 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 			data_start += 1
 			continue
 		first = str(row[0] or "").strip().upper()
-		if first in ("", "S/N", "SN", "NAMES", "NAME") or "PENSION" in first or "RSSB" in first:
+		if first in ("", "S/N", "SN", "NAMES", "NAME", "ID NUMBER", "EMPLOYEE ID") or "PENSION" in first or "RSSB" in first:
 			sub_header_rows.append(row)
 			data_start += 1
 			continue
@@ -200,7 +202,7 @@ def _looks_like_sheet_title(text: str) -> bool:
 	if not text or len(text) < 12:
 		return False
 	upper = text.upper()
-	if any(token in upper for token in ("GROSS SALARY", "BASIC SALARY", "PAYE", "PENSION", "ID NUMBER")):
+	if any(token in upper for token in ("GROSS SALARY", "BASIC SALARY", "PAYE", "PENSION", "ID NUMBER", "EMPLOYEE ID")):
 		return False
 	has_year = bool(re.search(r"\b20\d{2}\b", text))
 	has_month = any(month in text.lower() for month in MONTH_MAP)
@@ -294,6 +296,9 @@ def _build_column_map(headers: list[str], sub_header_rows: list[tuple]) -> dict[
 		"name": "employee_name",
 		"id_number": "employee_id_number",
 		"id_no": "employee_id_number",
+		"employee_id": "employee_id_number",
+		"employee_id_no": "employee_id_number",
+		"employee_id_number": "employee_id_number",
 		"basic_salary": "basic_salary",
 		"basic": "basic_salary",
 		"gross_salary": "gross_salary",
@@ -433,7 +438,7 @@ def _apply_fuzzy_field_map(by_key: dict[str, int], field_map: dict[str, int]) ->
 		("gross_salary", lambda k: "gross" in k and "lumpsum" in k),
 		("department", lambda k: k == "department" or k == "dept"),
 		("date_of_joining", lambda k: "joining" in k and "date" in k),
-		("employee_id_number", lambda k: k in ("id_number", "id_no") or ("id" in k and "number" in k)),
+		("employee_id_number", _is_employee_id_header),
 		("employee_name", lambda k: k in ("names", "name") and "account" not in k and "bank" not in k),
 		("position", lambda k: k == "position"),
 		("account_number", lambda k: "account" in k and "number" in k),
@@ -460,6 +465,16 @@ def _is_transport_header(key: str) -> bool:
 def _is_ict_allowance_header(key: str) -> bool:
 	"""ICT Allowance. Extra words are ignored. ITC is a different column."""
 	return "ict" in _header_tokens(key)
+
+
+def _is_employee_id_header(key: str) -> bool:
+	"""ID NUMBER and Employee ID are the same payroll id column."""
+	if key in {"id_number", "id_no", "employee_id", "employee_id_no", "employee_id_number"}:
+		return True
+	tokens = _header_tokens(key)
+	if "id" in tokens and "number" in tokens:
+		return True
+	return "employee" in tokens and "id" in tokens
 
 
 def _is_tc_allowance_header(key: str) -> bool:

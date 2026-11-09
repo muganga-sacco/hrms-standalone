@@ -458,7 +458,7 @@ PAYSLIP_FIELDS = [
 
 MAX_PAYSLIP_MONTHS = 24
 MAX_PAYSLIP_ROWS_ONE_PAGE = 3
-# Template grid is 14 columns, including ICT Allowance. Transport, TC Allowance,
+# Template grid is 14 columns, including ICT Allowance. Transport, ITC Allowance,
 # and Bonus are inserted. ICT is removed when no row has an ICT amount.
 PAYSLIP_TABLE_COLS_WITH_ICT = 17
 PAYSLIP_TABLE_COLS_WITHOUT_ICT = 16
@@ -1162,13 +1162,13 @@ def _payslip_has_ict(records: list[dict]) -> bool:
 
 
 def _prepare_payslip_earning_columns(table, include_ict: bool) -> int:
-	"""Place Transport and TC Allowance after Basic Salary.
+	"""Place Transport and ITC Allowance after Basic Salary.
 
 	ICT Allowance is kept only when a payslip row has an ICT amount.
 	Bonus and other Incentives follows those allowance columns.
 	"""
 	_insert_column_after(table, 2, "Transport allowance", TRANSPORT_COLUMN_WIDTH)
-	_insert_column_after(table, 3, "TC Allowance", ALLOWANCE_COLUMN_WIDTH)
+	_insert_column_after(table, 3, "ITC Allowance", ALLOWANCE_COLUMN_WIDTH)
 	if include_ict:
 		bonus_after = 5
 		lumpsum_col = 7
@@ -1521,7 +1521,7 @@ def _payslip_html_from_records(records, employee_id_number: str, signoff: dict |
 		"Payment Date",
 		"Basic Salary",
 		"Transport allowance",
-		"TC Allowance",
+		"ITC Allowance",
 	]
 	if include_ict:
 		earning_labels.append("ICT Allowance")
@@ -1656,7 +1656,7 @@ def payslip_table_headers(include_ict: bool = False) -> list[str]:
 		"Payment Date",
 		"Basic Salary",
 		"Transport",
-		"TC Allowance",
+		"ITC Allowance",
 	]
 	if include_ict:
 		headers.append("ICT Allowance")
