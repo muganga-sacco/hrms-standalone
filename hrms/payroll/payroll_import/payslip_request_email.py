@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
 # License: GNU General Public License v3. See license.txt
 
-"""Email HR when a payslip request is submitted, and DAF after HR approves."""
+"""Email the next approver when a payslip request is waiting."""
 
 from __future__ import annotations
 
@@ -9,55 +9,68 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import get_url_to_form
+from frappe.utils import escape_html, get_url_to_form
 
 
 def notify_pending_hr(doc) -> None:
-	_send_payslip_request_mail(
-		doc,
-		recipients=_hr_recipients(),
-		subject=_("Payslip request pending HR: {0}").format(doc.employee_name or doc.name),
-		heading=_("A payslip request needs HR approval"),
-		intro=_("A new payslip request is waiting for HR."),
-	)
+	notify_approval_required(doc, "HR")
 
 
 def notify_pending_daf(doc) -> None:
-	_send_payslip_request_mail(
-		doc,
-		recipients=_daf_recipients(),
-		subject=_("Payslip request pending DAF: {0}").format(doc.employee_name or doc.name),
-		heading=_("A payslip request needs DAF approval"),
-		intro=_("HR has verified this payslip request. It is waiting for DAF approval."),
-	)
+	notify_approval_required(doc, "DAF")
 
 
-def _send_payslip_request_mail(doc, recipients: list[str], subject: str, heading: str, intro: str) -> None:
+def notify_pending_md(doc) -> None:
+	notify_approval_required(doc, "MD")
+
+
+def notify_approval_required(doc, audience: str) -> None:
+	audience = (audience or "HR").upper()
+	if audience == "HR":
+		recipients = _hr_recipients()
+	elif audience == "DAF":
+		recipients = _daf_recipients()
+	else:
+		recipients = _md_recipients()
+	_send_payslip_request_mail(doc, recipients, audience)
+
+
+def _send_payslip_request_mail(doc, recipients: list[str], audience: str) -> None:
 	if not _emails_enabled() or not recipients:
 		return
 	link = get_url_to_form("Payslip Request", doc.name)
 	period = _period_label(doc)
+	who = _requester_line(doc)
 	message = f"""
-		<p>{frappe.utils.escape_html(intro)}</p>
-		<p>
-			<strong>{_("Request")}:</strong> {frappe.utils.escape_html(doc.name)}<br>
-			<strong>{_("Employee")}:</strong> {frappe.utils.escape_html(doc.employee_name or doc.employee)}<br>
-			<strong>{_("Period")}:</strong> {frappe.utils.escape_html(period)}
-		</p>
-		<p><a href="{frappe.utils.escape_html(link)}">{_("Open payslip request")}</a></p>
+		<p>Dear {escape_html(audience)}</p>
+		<p>{escape_html(who)} has requested for payslip for the Period {escape_html(period)}.</p>
+		<p>Kindly review the request and take the appropriate action.</p>
+		<p><a href="{escape_html(link)}">{_("Open payslip request")}</a></p>
 	"""
 	try:
 		frappe.sendmail(
 			recipients=recipients,
-			subject=subject,
+			subject="Payslip Request – Approval Required",
 			message=message,
 			sender=_sender_email(),
 			now=True,
 			expose_recipients="header",
-			header=[heading, "blue"],
+			header=[_("Payslip Request – Approval Required"), "blue"],
 		)
 	except Exception:
 		frappe.log_error(title="Payslip request email")
+
+
+def _requester_line(doc) -> str:
+	name = (doc.employee_name or doc.employee or "").strip()
+	title = ""
+	if doc.employee:
+		gender = (frappe.db.get_value("Employee", doc.employee, "gender") or "").strip()
+		if gender == "Male":
+			title = "Mr. "
+		elif gender == "Female":
+			title = "Mrs./Miss "
+	return f"{title}{name}".strip() or doc.name
 
 
 def _emails_enabled() -> bool:
@@ -84,6 +97,12 @@ def _hr_recipients() -> list[str]:
 
 def _daf_recipients() -> list[str]:
 	return _setting_or_role_emails("daf_payslip_notification_emails", ("DAF",))
+
+
+def _md_recipients() -> list[str]:
+	if not frappe.get_meta("Payroll Settings").has_field("md_payslip_notification_emails"):
+		return []
+	return _split_emails(frappe.db.get_single_value("Payroll Settings", "md_payslip_notification_emails"))
 
 
 def _setting_or_role_emails(fieldname: str, roles: tuple[str, ...]) -> list[str]:

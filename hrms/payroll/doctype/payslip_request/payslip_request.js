@@ -13,6 +13,10 @@ function payslip_is_daf() {
 	return frappe.session.user === "Administrator" || frappe.user.has_role("DAF");
 }
 
+function payslip_is_md() {
+	return frappe.session.user === "Administrator" || frappe.user.has_role("MD");
+}
+
 function payslip_hr_picks_employee() {
 	return payslip_is_hr_approver();
 }
@@ -149,8 +153,10 @@ frappe.ui.form.on("Payslip Request", {
 
 	refresh(frm) {
 		frm.clear_custom_buttons();
+		frm.remove_custom_button(__("Add Cachet"));
 		const is_hr = payslip_is_hr_approver();
 		const is_daf = payslip_is_daf();
+		const is_md = payslip_is_md();
 		payslip_fill_period(frm);
 
 		if (!payslip_hr_picks_employee()) {
@@ -171,8 +177,26 @@ frappe.ui.form.on("Payslip Request", {
 			}).addClass("btn-primary");
 		}
 
+		const after_own = (is_own) => {
+			payslip_add_decision_buttons(frm, { is_hr, is_daf, is_md, is_own });
+		};
+		if (!frm.doc.employee) {
+			after_own(false);
+		} else {
+			frappe.db.get_value("Employee", frm.doc.employee, "user_id", (r) => {
+				const uid = typeof r === "string" ? r : r && r.user_id;
+				after_own(!!(uid && uid === frappe.session.user));
+			});
+		}
+	},
+});
+
+function payslip_add_decision_buttons(frm, roles) {
+		const { is_hr, is_daf, is_md, is_own } = roles;
+
 		if (
-			((is_hr || is_daf) && ["Pending HR", "Pending DAF", "Pending"].includes(frm.doc.status)) ||
+			((is_hr || is_daf || is_md) &&
+				["Pending HR", "Pending DAF", "Pending MD", "Pending"].includes(frm.doc.status)) ||
 			frm.doc.status === "Approved"
 		) {
 			frm.add_custom_button(__("Preview Payslip"), () => {
@@ -180,7 +204,7 @@ frappe.ui.form.on("Payslip Request", {
 			});
 		}
 
-		if (is_hr && (frm.doc.status === "Pending HR" || frm.doc.status === "Pending")) {
+		if (!is_own && is_hr && (frm.doc.status === "Pending HR" || frm.doc.status === "Pending")) {
 			frm.add_custom_button(__("Approve"), () => {
 				payslip_open_preview(frm, () => {
 					frappe.call({
@@ -195,7 +219,7 @@ frappe.ui.form.on("Payslip Request", {
 			}).addClass("btn-primary");
 		}
 
-		if (is_daf && frm.doc.status === "Pending DAF") {
+		if (!is_own && is_daf && frm.doc.status === "Pending DAF") {
 			frm.add_custom_button(__("Approve"), () => {
 				payslip_open_preview(frm, () => {
 					frappe.call({
@@ -210,9 +234,25 @@ frappe.ui.form.on("Payslip Request", {
 			}).addClass("btn-primary");
 		}
 
+		if (!is_own && is_md && frm.doc.status === "Pending MD") {
+			frm.add_custom_button(__("Approve"), () => {
+				payslip_open_preview(frm, () => {
+					frappe.call({
+						method: "hrms.payroll.doctype.payslip_request.payslip_request.md_approve_payslip_request",
+						args: { docname: frm.doc.name },
+						freeze: true,
+						callback() {
+							frm.reload_doc();
+						},
+					});
+				});
+			}).addClass("btn-primary");
+		}
+
 		if (
-			(is_hr || is_daf) &&
-			["Pending HR", "Pending DAF", "Pending"].includes(frm.doc.status)
+			!is_own &&
+			(is_hr || is_daf || is_md) &&
+			["Pending HR", "Pending DAF", "Pending MD", "Pending"].includes(frm.doc.status)
 		) {
 			frm.add_custom_button(__("Reject"), () => {
 				frappe.prompt(
@@ -242,12 +282,6 @@ frappe.ui.form.on("Payslip Request", {
 			});
 		}
 
-		if (is_hr) {
-			frm.add_custom_button(__("Add Cachet"), () => {
-				hrms.payroll.add_cachet();
-			});
-		}
-
 		if (frm.doc.status === "Approved") {
 			frm.add_custom_button(__("Download Payslip"), () => {
 				const qs = new URLSearchParams({ docname: frm.doc.name });
@@ -266,10 +300,13 @@ frappe.ui.form.on("Payslip Request", {
 				"to_year",
 				"to_month_name",
 				"remarks",
+				"remarks_other",
 			].forEach((fieldname) => frm.set_df_property(fieldname, "read_only", 1));
 		}
-	},
+		frm.remove_custom_button(__("Add Cachet"));
+}
 
+frappe.ui.form.on("Payslip Request", {
 	payroll_year: payslip_sync_single,
 	payroll_month_name: payslip_sync_single,
 	period_type: payslip_sync_range,
@@ -294,9 +331,9 @@ function payslip_file_src(url) {
 
 function payslip_sign_block(block) {
 	block = block || {};
-	const src = payslip_file_src(block.image_data_uri || block.image_url);
+	const src = payslip_file_src(block.image_data_uri);
 	const img = src
-		? `<img src="${payslip_escape(src)}" alt="signature" style="max-height:82px;width:auto;max-width:100%;object-fit:contain;object-position:left center;display:block;">`
+		? `<img src="${payslip_escape(src)}" alt="signature" style="height:70px;width:auto;max-width:210px;object-fit:contain;display:block;">`
 		: "";
 	const when = block.approved_on ? `Approved on ${payslip_escape(block.approved_on)}` : "";
 	return `
@@ -304,7 +341,7 @@ function payslip_sign_block(block) {
 			<div style="font-weight:700;min-height:18px;">${payslip_escape(block.heading || "")}</div>
 			<div style="font-weight:700;min-height:18px;">${payslip_escape(block.name || "")}</div>
 			<div style="font-size:10pt;min-height:28px;margin-top:1px;">${payslip_escape(block.title || "")}</div>
-			<div style="height:86px;margin:6px 0 4px;">${img}</div>
+			<div style="height:74px;margin:6px 0 4px;">${img}</div>
 			<div style="font-size:10pt;min-height:16px;">${when}</div>
 		</td>
 	`;
@@ -391,6 +428,7 @@ function payslip_preview_html(data) {
 			<div style="text-align:center;font-weight:700;text-decoration:underline;letter-spacing:1px;margin:2px 0 8px;">PAYSLIP</div>
 			<div style="font-size:11px;line-height:1.4;margin:6px 0 10px;">
 				<div><strong>EMPLOYEE NAMES:</strong> ${payslip_escape(data.employee_name)}</div>
+				<div><strong>EMPLOYEE ID:</strong> ${payslip_escape(data.employee_id_number)}</div>
 				<div><strong>POSITION:</strong> ${payslip_escape(data.position)}</div>
 				<div><strong>DEPARTMENT:</strong> ${payslip_escape(data.department)}</div>
 				<div><strong>ACCOUNT NUMBER:</strong> ${payslip_escape(data.account_number)}</div>

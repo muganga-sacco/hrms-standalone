@@ -247,7 +247,7 @@ def _place_variable_dashboard_in_payroll() -> None:
 	frappe.db.set_value("Workspace Link", link_name, "idx", payslip_idx, update_modified=False)
 
 
-PAYSLIP_PENDING_STATUSES = ("Pending HR", "Pending DAF", "Pending")
+PAYSLIP_PENDING_STATUSES = ("Pending HR", "Pending DAF", "Pending MD", "Pending")
 PAYSLIP_PENDING_FILTER = json.dumps({"status": ["in", list(PAYSLIP_PENDING_STATUSES)]})
 
 
@@ -272,6 +272,55 @@ def _ensure_payslip_request_pending_badge() -> None:
 		WHERE parent = 'Payroll' AND label = 'Payslip Request' AND type = 'DocType'
 		""",
 		PAYSLIP_PENDING_FILTER,
+	)
+	_ensure_my_payslips_own_only()
+
+
+MY_PAYSLIP_OWNER_FILTER = '{owner: ["=", frappe.session.user]}'
+MY_PAYSLIP_PENDING_FILTER = (
+	'{owner: ["=", frappe.session.user], status: ["in", '
+	'["Pending HR", "Pending DAF", "Pending MD", "Pending"]]}'
+)
+MY_PAYSLIP_APPROVED_FILTER = '{owner: ["=", frappe.session.user], status: ["=", "Approved"]}'
+
+
+def _ensure_my_payslips_own_only() -> None:
+	"""My Payslips workspace must not mix an approver's own slips with everyone else's."""
+	if frappe.db.table_exists("Workspace Shortcut"):
+		frappe.db.sql(
+			"""
+			UPDATE `tabWorkspace Shortcut`
+			SET stats_filter = %s, format = NULL
+			WHERE parent = 'My Payslips' AND link_to = 'Payslip Request' AND type = 'DocType'
+				AND IFNULL(doc_view, 'List') != 'New'
+			""",
+			MY_PAYSLIP_OWNER_FILTER,
+		)
+	if not frappe.db.table_exists("Workspace Quick List"):
+		return
+	frappe.db.sql(
+		"""
+		UPDATE `tabWorkspace Quick List`
+		SET quick_list_filter = %s
+		WHERE parent = 'My Payslips' AND label = 'Pending HR approval'
+		""",
+		MY_PAYSLIP_PENDING_FILTER,
+	)
+	frappe.db.sql(
+		"""
+		UPDATE `tabWorkspace Quick List`
+		SET quick_list_filter = %s
+		WHERE parent = 'My Payslips' AND label = 'Approved — download payslip'
+		""",
+		MY_PAYSLIP_APPROVED_FILTER,
+	)
+	frappe.db.sql(
+		"""
+		UPDATE `tabWorkspace Quick List`
+		SET quick_list_filter = %s
+		WHERE parent = 'My Payslips' AND label = 'All my requests'
+		""",
+		MY_PAYSLIP_OWNER_FILTER,
 	)
 
 

@@ -388,7 +388,10 @@ def _append_payslip_signoff(doc, signoff: dict | None) -> None:
 			_tight(signature)
 			image_path = block.get("image_path")
 			if image_path and os.path.exists(image_path):
-				signature.add_run().add_picture(image_path, height=Inches(0.85))
+				from hrms.payroll.payroll_import.payroll_signoff import fit_payslip_signature_path
+
+				fitted_path = fit_payslip_signature_path(image_path) or image_path
+				signature.add_run().add_picture(fitted_path, height=Inches(0.55))
 			else:
 				signature.add_run(" ")
 
@@ -1016,20 +1019,31 @@ def _insert_paragraph_after(paragraph, text: str):
 def _update_employee_header(doc, record: dict) -> None:
 	labels = {
 		"EMPLOYEE NAMES:": record.get("employee_name"),
+		"EMPLOYEE ID:": record.get("employee_id_number"),
 		"POSITION:": record.get("position"),
 		"DEPARTMENT:": record.get("department"),
 		"ACCOUNT NUMBER:": record.get("account_number"),
 		"BENEFICIARY BANK:": record.get("bank"),
 	}
 	department_para = None
+	names_para = None
+	has_employee_id = False
 	for paragraph in doc.paragraphs:
 		text = paragraph.text or ""
+		if text.startswith("EMPLOYEE ID:"):
+			has_employee_id = True
 		for prefix, value in labels.items():
 			if text.startswith(prefix):
 				display = (value or "").strip() or "-"
 				paragraph.text = f"{prefix} {display}"
+				if prefix == "EMPLOYEE NAMES:":
+					names_para = paragraph
 				if prefix == "DEPARTMENT:":
 					department_para = paragraph
+
+	if names_para and not has_employee_id:
+		eid = (record.get("employee_id_number") or "").strip() or "-"
+		_insert_paragraph_after(names_para, f"EMPLOYEE ID: {eid}")
 
 	variable_labels = [label for label in (record.get("variable_labels") or []) if label]
 	if variable_labels and department_para:
@@ -1422,9 +1436,14 @@ def _signoff_blocks(signoff: dict | None) -> list[dict]:
 def _signoff_with_images(signoff: dict | None) -> dict | None:
 	if not signoff:
 		return None
+	from hrms.payroll.payroll_import.payroll_signoff import fit_payslip_signature_path
+
 	out = dict(signoff)
 	for key in ("verified_by", "approved_by", "cachet"):
 		block = dict(out.get(key) or {})
+		if key != "cachet" and block.get("image_path"):
+			block["image_path"] = fit_payslip_signature_path(block["image_path"])
+			block["image_url"] = None
 		if block.get("image_path"):
 			try:
 				block["image_data_uri"] = _image_data_uri(block["image_path"])
@@ -1464,8 +1483,8 @@ def _payslip_css() -> str:
 	.sign .heading{font-weight:700;min-height:18px}
 	.sign .name{font-weight:700;min-height:18px}
 	.sign .role{font-size:10pt;min-height:28px;margin-top:1px}
-	.sign .sig-slot{height:86px;margin:6px 0 4px}
-	.sign .sig-slot img{max-height:82px;width:auto;max-width:100%;object-fit:contain;object-position:left center;display:block}
+	.sign .sig-slot{height:74px;margin:6px 0 4px}
+	.sign .sig-slot img{height:70px;width:auto;max-width:210px;object-fit:contain;object-position:left center;display:block}
 	.sign .when{font-size:10pt;min-height:16px}
 	.sign td.cachet{width:32%;text-align:right;vertical-align:top;padding:0}
 	.sign td.cachet .sig-slot{height:145px}
@@ -1526,7 +1545,8 @@ def _payslip_html_from_records(records, employee_id_number: str, signoff: dict |
 
 	def _sign_cell(block: dict) -> str:
 		img = (
-			f'<img src="{block["image_data_uri"]}" alt="signature">'
+			f'<img src="{block["image_data_uri"]}" alt="signature" '
+			f'style="height:70px;width:auto;max-width:210px;object-fit:contain;display:block;">'
 			if block.get("image_data_uri")
 			else ""
 		)
@@ -1564,6 +1584,7 @@ def _payslip_html_from_records(records, employee_id_number: str, signoff: dict |
 		<div class="payslip-title">PAYSLIP</div>
 		<div class="payslip-meta">
 			<div>EMPLOYEE NAMES: {_txt(latest.get("employee_name"))}</div>
+			<div>EMPLOYEE ID: {_txt(latest.get("employee_id_number") or employee_id_number)}</div>
 			<div>POSITION: {_txt(latest.get("position"))}</div>
 			<div>DEPARTMENT: {_txt(latest.get("department"))}</div>
 			<div>ACCOUNT NUMBER: {_txt(latest.get("account_number"))}</div>
@@ -1676,6 +1697,7 @@ def build_payslip_preview(
 	signoff = _signoff_with_images(signoff)
 	return {
 		"employee_name": latest.get("employee_name") or "-",
+		"employee_id_number": latest.get("employee_id_number") or employee_id_number or "-",
 		"position": latest.get("position") or "-",
 		"department": latest.get("department") or "-",
 		"account_number": latest.get("account_number") or "-",
