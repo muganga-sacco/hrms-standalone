@@ -48,6 +48,9 @@ def parse_payroll_excel(file_path: str) -> dict[str, Any]:
 	headers = _normalize_headers(rows[header_row_idx])
 	column_map = _build_column_map(headers, sub_header_rows)
 	by_key = _headers_to_by_key(headers, sub_header_rows)
+	bonus_idx = _find_gross_bonus_column(rows, header_row_idx, data_start)
+	if bonus_idx is not None:
+		column_map["gross_bonus"] = bonus_idx
 	payroll_sheet_type = detect_payroll_sheet_type(rows)
 
 	while data_start < len(rows) and not _is_data_row(rows[data_start], column_map):
@@ -139,7 +142,7 @@ def detect_payroll_sheet_type(rows: list[tuple]) -> str:
 			if not isinstance(cell, str):
 				continue
 			upper = cell.upper()
-			if any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE PAY")):
+			if any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE")):
 				return "Variable"
 			if "LUMPSUM" in upper:
 				return "Lumpsum"
@@ -159,7 +162,7 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 				candidate = cell.strip()
 				if "STAFF PAYROLL" in upper:
 					title = candidate
-				elif any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE PAY")):
+				elif any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE")):
 					if candidate and (not title or len(candidate) > len(title)):
 						title = candidate
 				elif "LUMPSUM" in upper and "GROSS" not in upper:
@@ -173,9 +176,13 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 		if first_cell in ("S/N", "S/N ", "SN", "NAMES", "NAME", "#", "ID NUMBER", "EMPLOYEE ID"):
 			header_idx = idx
 			break
-		joined = " ".join(str(c or "").strip().upper() for c in row[:8])
+		joined = " ".join(str(c or "").strip().upper() for c in row)
 		if ("NAMES" in joined or "ID NUMBER" in joined or "EMPLOYEE ID" in joined) and (
-			"GROSS" in joined or "LUMPSUM" in joined or "DEPARTMENT" in joined or "BASIC" in joined
+			"GROSS" in joined
+			or "BONUS" in joined
+			or "LUMPSUM" in joined
+			or "DEPARTMENT" in joined
+			or "BASIC" in joined
 		):
 			header_idx = idx
 			break
@@ -505,6 +512,20 @@ def _is_gross_bonus_header(key: str) -> bool:
 	return key in ("bonus", "bonuses", "bonus_pay", "incentives", "incentive", "variable_pay")
 
 
+def _find_gross_bonus_column(rows: list[tuple], header_idx: int, data_start: int) -> int | None:
+	"""Find the Gross Bonus column even when the label sits on a sub-header row."""
+	end = data_start if data_start > header_idx else header_idx + 4
+	for row in rows[header_idx:end]:
+		if not row:
+			continue
+		for idx, cell in enumerate(row):
+			if not isinstance(cell, str):
+				continue
+			if _is_gross_bonus_header(_header_key(cell)):
+				return idx
+	return None
+
+
 def _header_key(text: str) -> str:
 	text = text.strip().lower()
 	if not text:
@@ -690,6 +711,11 @@ def _excel_text(val) -> str | None:
 def _flt(val):
 	if val is None or val == "":
 		return 0.0
+	if isinstance(val, str):
+		text = val.strip().replace(",", "").replace(" ", "")
+		if text in ("", "-", "–", "—"):
+			return 0.0
+		val = text
 	try:
 		return float(val)
 	except (TypeError, ValueError):

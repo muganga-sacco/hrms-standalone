@@ -522,7 +522,12 @@ def _is_lumpsum_record(record: dict) -> bool:
 
 
 def _is_variable_record(record: dict) -> bool:
-	return (record.get("payroll_sheet_type") or "").strip() == "Variable"
+	"""Any bonus / incentive / variable pay sheet, not only Fidelity."""
+	sheet = (record.get("payroll_sheet_type") or "").strip()
+	if sheet == "Variable":
+		return True
+	label = f"{record.get('payroll_period_label') or ''} {sheet}".upper()
+	return any(token in label for token in ("BONUS", "INCENTIVE", "VARIABLE"))
 
 
 def _add_employee_id_variant(id_variants: set[str], val) -> None:
@@ -737,12 +742,11 @@ def _apply_staff_record_to_merged(target: dict, record: dict) -> None:
 
 
 def _variable_bonus_amount(record: dict) -> float:
-	"""Bonus Excel: show Gross Bonus from Basic Salary, Gross Bonus, or that sheet's Gross Salary."""
-	for key in ("basic_salary", "gross_bonus", "gross_salary"):
-		amount = _flt(record.get(key))
-		if amount:
-			return amount
-	return 0.0
+	"""Bonus and other Incentives: Basic Salary if present, else Gross Bonus from the bonus Excel."""
+	basic = _flt(record.get("basic_salary"))
+	if basic:
+		return basic
+	return _flt(record.get("gross_bonus"))
 
 
 def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> None:

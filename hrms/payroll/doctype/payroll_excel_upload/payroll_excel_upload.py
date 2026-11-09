@@ -97,6 +97,8 @@ def import_payroll_excel(docname: str):
 	log_lines: list[str] = []
 	if doc.payroll_sheet_type not in ("Staff Payroll", "Lumpsum", "Variable"):
 		frappe.throw(_("Select Payroll Sheet Type: Staff Payroll, Lumpsum, or Variable."))
+	if detected_type == "Variable":
+		doc.payroll_sheet_type = "Variable"
 	if doc.payroll_sheet_type != detected_type:
 		log_lines.append(
 			_("Note: Excel looks like {0}; import uses selected type {1}.").format(
