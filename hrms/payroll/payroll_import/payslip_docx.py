@@ -1747,8 +1747,7 @@ def _record_to_table_row(record: dict, include_ict: bool = False) -> list[str]:
 	other_deductions = _sheet_int(_other_deductions_amount(record))
 	gross_salary = _flt(record.get("gross_salary"))
 	net = _sheet_int(_sheet_net_paid(record))
-	# TOTAL follows Gross − Net. Do not move leftover cents onto Other Deductions.
-	total_deductions = _sheet_int(gross_salary) - net if gross_salary and net else 0
+	total_deductions = paye + pension + maternity_employee + cbhi + other_deductions
 
 	values = [
 		pay_period,

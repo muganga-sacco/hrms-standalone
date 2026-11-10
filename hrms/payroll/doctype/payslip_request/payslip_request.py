@@ -88,6 +88,8 @@ class PayslipRequest(Document):
 
 		self._validate_remarks()
 
+		self._validate_payroll_month_approved()
+
 		if self.employee:
 
 			resolved = resolve_employee_id_number_for_request(self)
@@ -113,6 +115,26 @@ class PayslipRequest(Document):
 		if self.remarks == "Others (please specify)" and not (self.get("remarks_other") or "").strip():
 
 			frappe.throw(_("Please specify the reason for the request."))
+
+
+
+	def _validate_payroll_month_approved(self) -> None:
+
+		if frappe.flags.in_install or frappe.flags.in_migrate or frappe.flags.in_patch:
+
+			return
+
+		if self.status not in ("Draft", "Pending", "Pending HR", "Pending DAF", "Pending MD"):
+
+			return
+
+		from hrms.payroll.payroll_import.payroll_excel_approval import (
+
+			throw_if_payslip_months_not_approved,
+
+		)
+
+		throw_if_payslip_months_not_approved(self)
 
 
 
@@ -480,6 +502,14 @@ def submit_payslip_request(docname: str):
 	if not _user_may_act_on_own_request(doc):
 
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	from hrms.payroll.payroll_import.payroll_excel_approval import (
+
+		throw_if_payslip_months_not_approved,
+
+	)
+
+	throw_if_payslip_months_not_approved(doc)
 
 	flow = _approval_flow_for_user()
 

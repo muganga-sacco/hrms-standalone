@@ -205,58 +205,180 @@ frappe.ui.form.on("Payroll Excel Upload", {
 		patch_payroll_file_attach_button(frm);
 		fill_company(frm);
 		fill_period(frm);
+		frm.clear_custom_buttons();
+		payroll_excel_set_indicator(frm);
 
 		if (frm.doc.docstatus !== 0 && !frm.is_new()) {
 			return;
 		}
 
+		const is_hr =
+			frappe.session.user === "Administrator" ||
+			frappe.user.has_role("HR Manager") ||
+			frappe.user.has_role("HR User");
+		const is_daf = frappe.session.user === "Administrator" || frappe.user.has_role("DAF");
+		const is_md = frappe.session.user === "Administrator" || frappe.user.has_role("MD");
+		const can_edit_file = ["Draft", "Imported", "Failed", "Rejected"].includes(frm.doc.status || "Draft");
 		const upload_action = () => upload_payroll_file_via_api(frm);
 
-		if (!frm.doc.payroll_file) {
-			frm.add_custom_button(__("Upload Excel File"), upload_action);
+		if (frm.is_new() || !frm.doc.payroll_file) {
+			if (is_hr) {
+				frm.add_custom_button(__("Upload Excel File"), upload_action);
+			}
 			return;
 		}
 
-		frm.add_custom_button(__("Replace Excel File"), upload_action);
-
-		frm.add_custom_button(__("Refresh Logo & Signatures"), () => {
-			frappe.call({
-				method:
-					"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.refresh_sheet_layout_from_excel",
-				args: { docname: frm.doc.name },
-				freeze: true,
-				callback(r) {
-					if (!r.exc) {
-						frappe.show_alert({ message: __("Sheet layout updated from Excel"), indicator: "green" });
-						frm.reload_doc();
-					}
-				},
-			});
-		});
-
-		frm.add_custom_button(__("Import from Excel"), () => {
-			const run_import = () => {
+		if (is_hr && can_edit_file) {
+			frm.add_custom_button(__("Replace Excel File"), upload_action);
+			frm.add_custom_button(__("Refresh Logo & Signatures"), () => {
 				frappe.call({
-					method: "hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.import_payroll_excel",
+					method:
+						"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.refresh_sheet_layout_from_excel",
 					args: { docname: frm.doc.name },
 					freeze: true,
-					freeze_message: __("Importing payroll..."),
 					callback(r) {
 						if (!r.exc) {
-							frappe.show_alert({
-								message: __("Imported {0} record(s)", [r.message.imported]),
-								indicator: "green",
-							});
+							frappe.show_alert({ message: __("Sheet layout updated from Excel"), indicator: "green" });
 							frm.reload_doc();
 						}
 					},
 				});
-			};
-			if (frm.is_dirty()) {
-				frm.save().then(run_import);
-			} else {
-				run_import();
-			}
-		});
+			});
+			frm.add_custom_button(__("Import from Excel"), () => {
+				const run_import = () => {
+					frappe.call({
+						method: "hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.import_payroll_excel",
+						args: { docname: frm.doc.name },
+						freeze: true,
+						freeze_message: __("Importing payroll..."),
+						callback(r) {
+							if (!r.exc) {
+								frappe.show_alert({
+									message: __("Imported {0} record(s)", [r.message.imported]),
+									indicator: "green",
+								});
+								frm.reload_doc();
+							}
+						},
+					});
+				};
+				if (frm.is_dirty()) {
+					frm.save().then(run_import);
+				} else {
+					run_import();
+				}
+			});
+		}
+
+		if (is_hr && frm.doc.status === "Imported") {
+			frm.add_custom_button(__("Send for Approval"), () => {
+				const run = () => {
+					frappe.call({
+						method:
+							"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.submit_payroll_excel_for_approval",
+						args: { docname: frm.doc.name },
+						freeze: true,
+						callback(r) {
+							if (!r.exc) {
+								frappe.show_alert({
+									message: __("Sent to DAF. Confirm the Excel matches the signed payroll."),
+									indicator: "blue",
+								});
+								frm.reload_doc();
+							}
+						},
+					});
+				};
+				if (frm.is_dirty()) {
+					frm.save().then(run);
+				} else {
+					run();
+				}
+			}).addClass("btn-primary");
+		}
+
+		if (is_daf && frm.doc.status === "Pending DAF") {
+			frm.add_custom_button(__("Approve"), () => {
+				frappe.confirm(
+					__("Confirm this Excel matches the signed Staff / Lumpsum / Variable payroll, then approve for MD?"),
+					() => {
+						frappe.call({
+							method:
+								"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.daf_approve_payroll_excel",
+							args: { docname: frm.doc.name },
+							freeze: true,
+							callback() {
+								frm.reload_doc();
+							},
+						});
+					}
+				);
+			}).addClass("btn-primary");
+		}
+
+		if (is_md && frm.doc.status === "Pending MD") {
+			frm.add_custom_button(__("Approve"), () => {
+				frappe.confirm(
+					__("Confirm this Excel matches the signed payroll, then approve? Staff can request payslips after this."),
+					() => {
+						frappe.call({
+							method:
+								"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.md_approve_payroll_excel",
+							args: { docname: frm.doc.name },
+							freeze: true,
+							callback() {
+								frm.reload_doc();
+							},
+						});
+					}
+				);
+			}).addClass("btn-primary");
+		}
+
+		if (
+			((is_daf && frm.doc.status === "Pending DAF") || (is_md && frm.doc.status === "Pending MD"))
+		) {
+			frm.add_custom_button(__("Reject"), () => {
+				frappe.prompt(
+					[
+						{
+							fieldname: "rejection_reason",
+							fieldtype: "Small Text",
+							label: __("Reason"),
+							reqd: 1,
+						},
+					],
+					(values) => {
+						frappe.call({
+							method: "hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.reject_payroll_excel",
+							args: {
+								docname: frm.doc.name,
+								rejection_reason: values.rejection_reason,
+							},
+							freeze: true,
+							callback() {
+								frm.reload_doc();
+							},
+						});
+					},
+					__("Reject Payroll Excel")
+				);
+			});
+		}
 	},
 });
+
+function payroll_excel_set_indicator(frm) {
+	const colors = {
+		Draft: "gray",
+		Imported: "orange",
+		"Pending DAF": "blue",
+		"Pending MD": "purple",
+		Approved: "green",
+		Rejected: "red",
+		Failed: "red",
+	};
+	if (frm.doc.status) {
+		frm.page.set_indicator(__(frm.doc.status), colors[frm.doc.status] || "gray");
+	}
+}

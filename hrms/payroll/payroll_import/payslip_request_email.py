@@ -100,9 +100,13 @@ def _daf_recipients() -> list[str]:
 
 
 def _md_recipients() -> list[str]:
-	if not frappe.get_meta("Payroll Settings").has_field("md_payslip_notification_emails"):
-		return []
-	return _split_emails(frappe.db.get_single_value("Payroll Settings", "md_payslip_notification_emails"))
+	if frappe.get_meta("Payroll Settings").has_field("md_payslip_notification_emails"):
+		listed = _split_emails(
+			frappe.db.get_single_value("Payroll Settings", "md_payslip_notification_emails")
+		)
+		if listed:
+			return listed
+	return _emails_for_roles(("MD",))
 
 
 def _setting_or_role_emails(fieldname: str, roles: tuple[str, ...]) -> list[str]:

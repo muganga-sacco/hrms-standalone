@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import now_datetime
 
 from hrms.payroll.payroll_import.payroll_access import throw_if_not_hr_payroll
 from hrms.payroll.payroll_import.payroll_employee_link import (
@@ -79,6 +80,12 @@ def refresh_sheet_layout_from_excel(docname: str):
 def import_payroll_excel(docname: str):
 	throw_if_not_hr_payroll()
 	doc = frappe.get_doc("Payroll Excel Upload", docname)
+	if doc.status in ("Pending DAF", "Pending MD", "Approved"):
+		frappe.throw(
+			_("This file is {0}. Reject it or wait until it is rejected before importing again.").format(
+				doc.status
+			)
+		)
 	if not doc.payroll_file:
 		frappe.throw(_("Please attach a Payroll Excel file first."))
 
@@ -183,6 +190,7 @@ def import_payroll_excel(docname: str):
 
 	doc.imported_records = created
 	doc.status = "Imported" if created else "Failed"
+	_clear_approval_fields(doc)
 	doc.import_log = "\n".join(log_lines)
 	doc.flags.ignore_permissions = True
 	doc.flags.ignore_version = True
@@ -190,6 +198,119 @@ def import_payroll_excel(docname: str):
 	frappe.db.commit()
 
 	return {"imported": created, "log": doc.import_log}
+
+
+def _clear_approval_fields(doc) -> None:
+	for field in (
+		"submitted_by",
+		"submitted_for_approval_on",
+		"daf_approved_by",
+		"daf_approved_on",
+		"md_approved_by",
+		"md_approved_on",
+		"rejection_reason",
+	):
+		if doc.meta.has_field(field):
+			doc.set(field, None)
+
+
+def _reload_upload(docname: str):
+	return frappe.get_doc("Payroll Excel Upload", docname)
+
+
+@frappe.whitelist()
+def submit_payroll_excel_for_approval(docname: str):
+	throw_if_not_hr_payroll()
+	doc = _reload_upload(docname)
+	if doc.status != "Imported":
+		frappe.throw(_("Import the Excel successfully before sending it for approval."))
+	if not doc.imported_records:
+		frappe.throw(_("No payroll rows were imported from this Excel."))
+	if not doc.signed_payroll:
+		frappe.throw(_("Attach the signed payroll (PDF or Excel) so DAF and MD can match it to this upload."))
+	doc.submitted_by = frappe.session.user
+	doc.submitted_for_approval_on = now_datetime()
+	doc.rejection_reason = None
+	doc.daf_approved_by = None
+	doc.daf_approved_on = None
+	doc.md_approved_by = None
+	doc.md_approved_on = None
+	doc.status = "Pending DAF"
+	doc.flags.ignore_permissions = True
+	doc.save()
+	frappe.db.commit()
+	from hrms.payroll.payroll_import.payroll_excel_upload_email import notify_payroll_excel_approval
+
+	notify_payroll_excel_approval(doc, "DAF")
+	return {"status": doc.status}
+
+
+@frappe.whitelist()
+def daf_approve_payroll_excel(docname: str):
+	from hrms.payroll.payroll_import.payroll_signoff import throw_if_not_daf
+
+	throw_if_not_daf(_("Only DAF can approve this payroll Excel."))
+	doc = _reload_upload(docname)
+	if doc.status != "Pending DAF":
+		frappe.throw(_("Only payroll Excel waiting for DAF can be approved."))
+	if not doc.signed_payroll:
+		frappe.throw(_("Signed payroll must be attached before approval."))
+	doc.daf_approved_by = frappe.session.user
+	doc.daf_approved_on = now_datetime()
+	doc.rejection_reason = None
+	doc.status = "Pending MD"
+	doc.flags.ignore_permissions = True
+	doc.save()
+	frappe.db.commit()
+	from hrms.payroll.payroll_import.payroll_excel_upload_email import notify_payroll_excel_approval
+
+	notify_payroll_excel_approval(doc, "MD")
+	return {"status": doc.status}
+
+
+@frappe.whitelist()
+def md_approve_payroll_excel(docname: str):
+	from hrms.payroll.payroll_import.payroll_signoff import throw_if_not_md
+
+	throw_if_not_md(_("Only MD can approve this payroll Excel."))
+	doc = _reload_upload(docname)
+	if doc.status != "Pending MD":
+		frappe.throw(_("Only payroll Excel waiting for MD can be approved."))
+	if not doc.signed_payroll:
+		frappe.throw(_("Signed payroll must be attached before approval."))
+	doc.md_approved_by = frappe.session.user
+	doc.md_approved_on = now_datetime()
+	doc.rejection_reason = None
+	doc.status = "Approved"
+	doc.flags.ignore_permissions = True
+	doc.save()
+	frappe.db.commit()
+	from hrms.payroll.payroll_import.payroll_excel_upload_email import notify_payroll_excel_approved
+
+	notify_payroll_excel_approved(doc)
+	return {"status": doc.status}
+
+
+@frappe.whitelist()
+def reject_payroll_excel(docname: str, rejection_reason: str | None = None):
+	from hrms.payroll.payroll_import.payroll_signoff import user_has_daf_access, user_has_md_access
+
+	doc = _reload_upload(docname)
+	if doc.status not in ("Pending DAF", "Pending MD"):
+		frappe.throw(_("Only payroll Excel waiting for approval can be rejected."))
+	if doc.status == "Pending DAF" and not user_has_daf_access():
+		frappe.throw(_("Only DAF can reject this payroll Excel."), frappe.PermissionError)
+	if doc.status == "Pending MD" and not user_has_md_access():
+		frappe.throw(_("Only MD can reject this payroll Excel."), frappe.PermissionError)
+	doc.status = "Rejected"
+	doc.rejection_reason = (rejection_reason or "").strip() or _("Rejected")
+	doc.flags.ignore_permissions = True
+	doc.save()
+	frappe.db.commit()
+	from hrms.payroll.payroll_import.payroll_excel_upload_email import notify_payroll_excel_rejected
+
+	notify_payroll_excel_rejected(doc)
+	return {"status": doc.status}
 
 
 def _staff_payroll_row_for_lumpsum(record, employee_id: str, payroll_month) -> dict | None:

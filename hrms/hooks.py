@@ -45,6 +45,7 @@ doctype_js = {
 }
 doctype_list_js = {
 	"Payslip Request": "payroll/doctype/payslip_request/payslip_request_list.js",
+	"Payroll Excel Upload": "payroll/doctype/payroll_excel_upload/payroll_excel_upload_list.js",
 }
 permission_query_conditions = {
 	"Payslip Request": "hrms.payroll.doctype.payslip_request.payslip_request.get_permission_query_conditions",

@@ -50,7 +50,24 @@ HR_IMPORT_PERM_FLAGS = (
 )
 
 # Doctypes DAF/MD need read to show Payroll workspace links (not HR upload).
-VIEWER_LINK_DOCTYPES = ("Page", "Workspace", "Report", "Company", "Imported Payroll Record", "Payslip Request")
+VIEWER_LINK_DOCTYPES = (
+	"Page",
+	"Workspace",
+	"Report",
+	"Company",
+	"Imported Payroll Record",
+	"Payslip Request",
+	"Payroll Excel Upload",
+)
+PAYROLL_EXCEL_APPROVER_FLAGS = {
+	"read": 1,
+	"write": 1,
+	"print": 1,
+	"email": 1,
+	"export": 1,
+	"report": 1,
+}
+PAYROLL_EXCEL_PENDING_FILTER = json.dumps({"status": ["in", ["Pending DAF", "Pending MD"]]})
 
 
 def _ensure_custom_docperm_flags(doctype: str, role: str, flags: dict[str, int]) -> bool:
@@ -324,6 +341,50 @@ def _ensure_my_payslips_own_only() -> None:
 	)
 
 
+def _ensure_payroll_excel_approval_access() -> None:
+	for role in VIEW_ONLY_ROLES:
+		_ensure_custom_docperm_flags("Payroll Excel Upload", role, PAYROLL_EXCEL_APPROVER_FLAGS)
+	if not frappe.db.exists("Workspace", "Payroll"):
+		return
+	_insert_workspace_child(
+		"Workspace Shortcut",
+		"Payroll",
+		"shortcuts",
+		{
+			"type": "DocType",
+			"label": "Payroll Excel approval",
+			"link_to": "Payroll Excel Upload",
+			"doc_view": "List",
+			"color": "Blue",
+			"stats_filter": PAYROLL_EXCEL_PENDING_FILTER,
+			"format": "{} Pending",
+		},
+		"Payroll Excel Upload",
+	)
+	if frappe.db.table_exists("Workspace Shortcut"):
+		frappe.db.sql(
+			"""
+			UPDATE `tabWorkspace Shortcut`
+			SET stats_filter = %s, format = '{} Pending', label = 'Payroll Excel approval'
+			WHERE parent = 'Payroll' AND link_to = 'Payroll Excel Upload' AND type = 'DocType'
+			""",
+			PAYROLL_EXCEL_PENDING_FILTER,
+		)
+	_insert_workspace_child(
+		"Workspace Link",
+		"Payroll",
+		"links",
+		{
+			"type": "Link",
+			"label": "Payroll Excel Upload",
+			"link_type": "DocType",
+			"link_to": "Payroll Excel Upload",
+			"link_count": 0,
+		},
+		"Payroll Excel Upload",
+	)
+
+
 def _ensure_payroll_settings_link() -> None:
 	if not frappe.db.exists("Workspace", "Payroll"):
 		return
@@ -427,6 +488,7 @@ def ensure_payroll_dashboard_permissions() -> dict:
 	payslip_self_service = _ensure_payslip_self_service_for_all_roles()
 	_ensure_variable_and_my_payroll_pages()
 	_ensure_payslip_request_pending_badge()
+	_ensure_payroll_excel_approval_access()
 	_ensure_payroll_settings_link()
 	_ensure_custom_docperm_flags("Payroll Settings", "HR Manager", {"read": 1, "write": 1, "print": 1, "email": 1})
 	_ensure_custom_docperm_flags("Payroll Settings", "HR User", {"read": 1, "write": 1, "print": 1, "email": 1})
