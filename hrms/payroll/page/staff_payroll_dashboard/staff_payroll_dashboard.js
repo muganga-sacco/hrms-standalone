@@ -3,6 +3,7 @@
 
 frappe.provide("hrms");
 
+if (frappe.pages["staff-payroll-dashboard"]) {
 frappe.pages["staff-payroll-dashboard"].on_page_load = function (wrapper) {
 	const page = frappe.ui.make_app_page({
 		parent: wrapper,
@@ -21,6 +22,7 @@ frappe.pages["staff-payroll-dashboard"].on_page_load = function (wrapper) {
 	const dashboard = new hrms.StaffPayrollDashboard(page);
 	dashboard.show();
 };
+}
 
 hrms.StaffPayrollDashboard = class StaffPayrollDashboard {
 	static MONTHS = [

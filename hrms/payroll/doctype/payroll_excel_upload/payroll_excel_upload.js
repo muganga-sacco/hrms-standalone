@@ -297,41 +297,37 @@ frappe.ui.form.on("Payroll Excel Upload", {
 			}).addClass("btn-primary");
 		}
 
+		payroll_excel_render_form_preview(frm);
+
 		if (is_daf && frm.doc.status === "Pending DAF") {
 			frm.add_custom_button(__("Approve"), () => {
-				frappe.confirm(
-					__("Confirm this Excel matches the signed Staff / Lumpsum / Variable payroll, then approve for MD?"),
-					() => {
-						frappe.call({
-							method:
-								"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.daf_approve_payroll_excel",
-							args: { docname: frm.doc.name },
-							freeze: true,
-							callback() {
-								frm.reload_doc();
-							},
-						});
-					}
-				);
+				payroll_excel_open_preview(frm, () => {
+					frappe.call({
+						method:
+							"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.daf_approve_payroll_excel",
+						args: { docname: frm.doc.name },
+						freeze: true,
+						callback() {
+							frm.reload_doc();
+						},
+					});
+				});
 			}).addClass("btn-primary");
 		}
 
 		if (is_md && frm.doc.status === "Pending MD") {
 			frm.add_custom_button(__("Approve"), () => {
-				frappe.confirm(
-					__("Confirm this Excel matches the signed payroll, then approve? Staff can request payslips after this."),
-					() => {
-						frappe.call({
-							method:
-								"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.md_approve_payroll_excel",
-							args: { docname: frm.doc.name },
-							freeze: true,
-							callback() {
-								frm.reload_doc();
-							},
-						});
-					}
-				);
+				payroll_excel_open_preview(frm, () => {
+					frappe.call({
+						method:
+							"hrms.payroll.doctype.payroll_excel_upload.payroll_excel_upload.md_approve_payroll_excel",
+						args: { docname: frm.doc.name },
+						freeze: true,
+						callback() {
+							frm.reload_doc();
+						},
+					});
+				});
 			}).addClass("btn-primary");
 		}
 
@@ -367,6 +363,100 @@ frappe.ui.form.on("Payroll Excel Upload", {
 		}
 	},
 });
+
+function payroll_excel_ensure_dashboard(done) {
+	frappe.provide("hrms");
+	const css = "/assets/hrms/css/staff_payroll_dashboard.css?v=20261110p";
+	if (!$("#staff-payroll-dashboard-css").length) {
+		$(`<link id="staff-payroll-dashboard-css" rel="stylesheet" href="${css}">`).appendTo("head");
+	}
+	if (!$("#payroll-excel-form-preview-css").length) {
+		$(`<style id="payroll-excel-form-preview-css">
+			[data-fieldname="payroll_preview"] .staff-payroll-dashboard .sheet-wrap {
+				max-height: 70vh;
+			}
+		</style>`).appendTo("head");
+	}
+	if (hrms.StaffPayrollDashboard) {
+		done();
+		return;
+	}
+	frappe.require(
+		"/assets/hrms/payroll/page/staff_payroll_dashboard/staff_payroll_dashboard.js",
+		() => done()
+	);
+}
+
+function payroll_excel_render_form_preview(frm) {
+	if (frm.is_new() || !frm.doc.payroll_month) {
+		return;
+	}
+	if (!["Imported", "Pending DAF", "Pending MD", "Approved"].includes(frm.doc.status || "")) {
+		return;
+	}
+	payroll_excel_ensure_dashboard(() => {
+		const field = frm.get_field("payroll_preview");
+		if (!field || !field.$wrapper) {
+			return;
+		}
+		const wrap = field.$wrapper;
+		wrap.addClass("staff-payroll-dashboard");
+		wrap.html('<div class="sheet-host"></div>');
+		const dash = Object.create(hrms.StaffPayrollDashboard.prototype);
+		dash.wrapper = wrap;
+		dash.sheet_host = wrap.find(".sheet-host");
+		dash.company = frm.doc.company;
+		dash.payroll_month = frm.doc.payroll_month;
+		dash.get_filters = () => ({
+			company: frm.doc.company || null,
+			payroll_month: frm.doc.payroll_month,
+			payroll_sheet_type: frm.doc.payroll_sheet_type || "Staff Payroll",
+			payroll_excel_upload: frm.doc.name,
+		});
+		dash.load_data({ silent: true });
+	});
+}
+
+function payroll_excel_open_preview(frm, on_approve) {
+	payroll_excel_ensure_dashboard(() => {
+		const d = new frappe.ui.Dialog({
+			title: __("{0} — {1}", [frm.doc.payroll_sheet_type || __("Payroll"), frm.doc.payroll_period_label || frm.doc.name]),
+			size: "extra-large",
+			fields: [{ fieldtype: "HTML", fieldname: "preview" }],
+			primary_action_label: on_approve ? __("Approve") : __("Close"),
+			primary_action() {
+				d.hide();
+				if (on_approve) {
+					on_approve();
+				}
+			},
+		});
+		d.$wrapper.addClass("payroll-excel-preview-dialog");
+		if (!$("#payroll-excel-preview-dialog-css").length) {
+			$(`<style id="payroll-excel-preview-dialog-css">
+				.payroll-excel-preview-dialog .modal-dialog { width: 96vw; max-width: 96vw; }
+				.payroll-excel-preview-dialog .modal-body { max-height: 78vh; overflow: hidden; }
+				.payroll-excel-preview-dialog .staff-payroll-dashboard .sheet-wrap { max-height: 70vh; }
+			</style>`).appendTo("head");
+		}
+		d.show();
+		const wrap = d.fields_dict.preview.$wrapper;
+		wrap.addClass("staff-payroll-dashboard");
+		wrap.html('<div class="sheet-host"></div>');
+		const dash = Object.create(hrms.StaffPayrollDashboard.prototype);
+		dash.wrapper = wrap;
+		dash.sheet_host = wrap.find(".sheet-host");
+		dash.company = frm.doc.company;
+		dash.payroll_month = frm.doc.payroll_month;
+		dash.get_filters = () => ({
+			company: frm.doc.company || null,
+			payroll_month: frm.doc.payroll_month,
+			payroll_sheet_type: frm.doc.payroll_sheet_type || "Staff Payroll",
+			payroll_excel_upload: frm.doc.name,
+		});
+		dash.load_data();
+	});
+}
 
 function payroll_excel_set_indicator(frm) {
 	const colors = {

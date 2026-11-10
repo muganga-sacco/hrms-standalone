@@ -15,6 +15,8 @@
   "column_break_1",
   "status",
   "imported_records",
+  "section_break_preview",
+  "payroll_preview",
   "section_break_sheet_meta",
   "payroll_sheet_logo",
   "payroll_sheet_footer",
@@ -94,6 +96,16 @@
    "fieldtype": "Int",
    "label": "Imported Records",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_break_preview",
+   "fieldtype": "Section Break",
+   "label": "Payroll Preview"
+  },
+  {
+   "fieldname": "payroll_preview",
+   "fieldtype": "HTML",
+   "label": "Payroll Preview"
   },
   {
    "fieldname": "section_break_sheet_meta",
@@ -209,7 +221,7 @@
    "link_fieldname": "payroll_excel_upload"
   }
  ],
- "modified": "2026-11-10 11:30:00.000000",
+ "modified": "2026-11-10 14:30:00.000000",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Payroll Excel Upload",
