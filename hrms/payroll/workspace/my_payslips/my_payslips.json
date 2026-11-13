@@ -1,0 +1,94 @@
+{
+ "charts": [],
+ "content": "[{\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Request a payslip</b></span>\",\"col\":12}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"New Payslip Request\",\"col\":4}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"My Payslip Requests\",\"col\":4}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"My Payroll\",\"col\":4}},{\"type\":\"spacer\",\"data\":{\"col\":12}},{\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>My requests</b></span>\",\"col\":12}},{\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Pending HR approval\",\"col\":4}},{\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Approved \\u2014 download payslip\",\"col\":4}},{\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"All my requests\",\"col\":4}}]",
+ "creation": "2026-09-24 12:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "file",
+ "idx": 0,
+ "is_hidden": 0,
+ "label": "My Payslips",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payslip requests",
+   "link_count": 2,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payslip Request",
+   "link_count": 0,
+   "link_to": "Payslip Request",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "My Payroll",
+   "link_count": 0,
+   "link_to": "my-payroll",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-11-13 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Payroll",
+ "name": "My Payslips",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [
+  {
+   "document_type": "Payslip Request",
+   "label": "Pending HR approval",
+   "quick_list_filter": "{owner: [\"=\", frappe.session.user], status: [\"in\", [\"Pending HR\", \"Pending DAF\", \"Pending MD\", \"Pending\"]]}"
+  },
+  {
+   "document_type": "Payslip Request",
+   "label": "Approved — download payslip",
+   "quick_list_filter": "{owner: [\"=\", frappe.session.user], status: [\"=\", \"Approved\"]}"
+  },
+  {
+   "document_type": "Payslip Request",
+   "label": "All my requests",
+   "quick_list_filter": "{owner: [\"=\", frappe.session.user]}"
+  }
+ ],
+ "roles": [],
+ "sequence_id": 2.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "doc_view": "New",
+   "label": "New Payslip Request",
+   "link_to": "Payslip Request",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "My Payslip Requests",
+   "link_to": "Payslip Request",
+   "stats_filter": "{owner: [\"=\", frappe.session.user]}",
+   "type": "DocType"
+  },
+  {
+   "label": "My Payroll",
+   "link_to": "my-payroll",
+   "type": "Page"
+  }
+ ],
+ "title": "My Payslips"
+}

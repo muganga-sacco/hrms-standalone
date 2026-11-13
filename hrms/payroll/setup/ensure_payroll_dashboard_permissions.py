@@ -341,10 +341,29 @@ def _ensure_my_payslips_own_only() -> None:
 	)
 
 
+def _import_payroll_workspace_from_app() -> None:
+	"""Production often skips workspace JSON if the DB row is newer or missing."""
+	from pathlib import Path
+
+	from frappe.modules.import_file import import_file_by_path
+
+	app = Path(frappe.get_app_path("hrms"))
+	for rel in (
+		"payroll/workspace/payroll/payroll.json",
+		"payroll/page/staff_payroll_dashboard/staff_payroll_dashboard.json",
+		"payroll/page/payroll_settings/payroll_settings.json",
+		"payroll/page/variable_dashboard/variable_dashboard.json",
+	):
+		path = app / rel
+		if path.exists():
+			import_file_by_path(str(path), force=True)
+
+
 def _ensure_hr_workspace_includes_payroll() -> None:
 	"""HR page stays the original layout. Payroll sits under HR in the sidebar like Leaves."""
 	if not frappe.db.exists("Workspace", "HR"):
 		return
+	_import_payroll_workspace_from_app()
 	payroll_shortcut_links = (
 		"staff-payroll-dashboard",
 		"Payslip Request",
