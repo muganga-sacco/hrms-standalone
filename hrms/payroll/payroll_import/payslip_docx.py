@@ -1653,7 +1653,7 @@ def build_payslip_pdf(
 	)
 	from frappe.utils.pdf import get_pdf
 
-	return get_pdf(
+	pdf = get_pdf(
 		html,
 		options={
 			"orientation": "Landscape",
@@ -1664,6 +1664,29 @@ def build_payslip_pdf(
 			"margin-right": "8mm",
 		},
 	)
+	return _encrypt_payslip_pdf(pdf)
+
+
+def _encrypt_payslip_pdf(pdf_bytes: bytes) -> bytes:
+	"""Lock the PDF so Word cannot open or convert it. PDF readers still open it."""
+	from io import BytesIO
+
+	from pypdf import PdfReader, PdfWriter
+	from pypdf.constants import UserAccessPermissions
+
+	reader = PdfReader(BytesIO(pdf_bytes))
+	writer = PdfWriter()
+	writer.append_pages_from_reader(reader)
+	owner = frappe.local.conf.get("encryption_key") or "muganga-payslip"
+	writer.encrypt(
+		user_password="",
+		owner_password=f"payslip:{owner}",
+		permissions_flag=UserAccessPermissions.PRINT | UserAccessPermissions.PRINT_TO_REPRESENTATION,
+		algorithm="AES-256",
+	)
+	out = BytesIO()
+	writer.write(out)
+	return out.getvalue()
 
 
 def payslip_table_headers(include_ict: bool = False) -> list[str]:

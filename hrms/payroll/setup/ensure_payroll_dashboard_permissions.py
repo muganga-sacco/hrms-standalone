@@ -341,6 +341,142 @@ def _ensure_my_payslips_own_only() -> None:
 	)
 
 
+def _ensure_hr_workspace_includes_payroll() -> None:
+	"""HR page stays the original layout. Payroll sits under HR in the sidebar like Leaves."""
+	if not frappe.db.exists("Workspace", "HR"):
+		return
+	payroll_shortcut_links = (
+		"staff-payroll-dashboard",
+		"Payslip Request",
+		"Payroll Excel Upload",
+		"Payroll",
+		"variable-dashboard",
+		"Payroll Settings",
+	)
+	frappe.db.sql(
+		"""
+		DELETE FROM `tabWorkspace Shortcut`
+		WHERE parent = 'HR' AND link_to IN %s
+		""",
+		(payroll_shortcut_links,),
+	)
+	frappe.db.sql(
+		"""
+		DELETE FROM `tabWorkspace Link`
+		WHERE parent = 'HR' AND (
+			link_to IN %s
+			OR (type = 'Card Break' AND label = 'Payroll')
+		)
+		""",
+		(payroll_shortcut_links,),
+	)
+	workspace = frappe.get_doc("Workspace", "HR")
+	content = frappe.parse_json(workspace.content) or []
+	cleaned = []
+	changed = False
+	skip_names = {
+		"Staff Payroll Dashboard",
+		"Payslip Request",
+		"Payroll Excel approval",
+		"Payroll",
+		"Variable Dashboard",
+	}
+	for block in content:
+		kind = block.get("type")
+		data = block.get("data") or {}
+		name = data.get("shortcut_name") or data.get("card_name")
+		if kind in ("shortcut", "card") and name in skip_names:
+			changed = True
+			continue
+		cleaned.append(block)
+	if changed:
+		workspace.content = json.dumps(cleaned)
+		workspace.db_update()
+
+	if frappe.db.exists("Workspace", "Payroll"):
+		frappe.db.set_value("Workspace", "Payroll", "parent_page", "HR", update_modified=False)
+		frappe.db.set_value("Workspace", "Payroll", "is_hidden", 0, update_modified=False)
+		frappe.db.sql(
+			"DELETE FROM `tabHas Role` WHERE parenttype = 'Workspace' AND parent = 'Payroll'"
+		)
+	_ensure_hr_workspace_report_cards()
+	_ensure_original_hr_visible_without_hr_user()
+	if frappe.db.exists("Workspace", "Shift & Attendance"):
+		frappe.db.set_value("Workspace", "Shift & Attendance", "is_hidden", 1, update_modified=False)
+
+
+def _ensure_hr_workspace_report_cards() -> None:
+	"""Original HR cards: Setup, Leaves, Attendance, Expense Claim — not mixed into Other Reports."""
+	if not frappe.db.exists("Workspace", "HR"):
+		return
+	breaks = (
+		("Setup", "Company", 4),
+		("Leaves", "Leave Application", 2),
+		("Attendance", "Attendance", 3),
+		("Expense Claim", "Expense Claim", 2),
+	)
+	for label, first_link, link_count in breaks:
+		if frappe.db.exists("Workspace Link", {"parent": "HR", "type": "Card Break", "label": label}):
+			continue
+		idx = frappe.db.get_value(
+			"Workspace Link",
+			{"parent": "HR", "type": "Link", "link_to": first_link},
+			"idx",
+		)
+		if not idx:
+			continue
+		frappe.db.sql(
+			"UPDATE `tabWorkspace Link` SET idx = idx + 1 WHERE parent = 'HR' AND idx >= %s",
+			idx,
+		)
+		frappe.get_doc(
+			{
+				"doctype": "Workspace Link",
+				"parent": "HR",
+				"parenttype": "Workspace",
+				"parentfield": "links",
+				"idx": idx,
+				"type": "Card Break",
+				"label": label,
+				"link_count": link_count,
+				"hidden": 0,
+				"onboard": 0,
+			}
+		).db_insert()
+	frappe.db.set_value(
+		"Workspace Link",
+		{"parent": "HR", "type": "Card Break", "label": "Other Reports"},
+		"link_count",
+		4,
+		update_modified=False,
+	)
+
+
+def _ensure_original_hr_visible_without_hr_user() -> None:
+	"""Match production HR page for Requester / Employee, without granting HR User."""
+	flags = {"read": 1, "write": 1, "create": 1, "print": 1, "email": 1, "report": 1}
+	doctypes = (
+		"Leave Application",
+		"Compensatory Leave Request",
+		"Attendance",
+		"Attendance Request",
+		"Employee Checkin",
+		"Expense Claim",
+		"Travel Request",
+		"Employee",
+		"Company",
+		"Designation",
+	)
+	roles = ("Requester", "Employee", "Employee Self Service", "Sales User")
+	for doctype in doctypes:
+		if not frappe.db.exists("DocType", doctype):
+			continue
+		for role in roles:
+			_ensure_custom_docperm_flags(doctype, role, flags)
+	for role in roles:
+		_ensure_page_role("team-updates", role)
+
+
 def _ensure_payroll_excel_approval_access() -> None:
 	for role in VIEW_ONLY_ROLES:
 		_ensure_custom_docperm_flags("Payroll Excel Upload", role, PAYROLL_EXCEL_APPROVER_FLAGS)
@@ -490,6 +626,7 @@ def ensure_payroll_dashboard_permissions() -> dict:
 	_ensure_payslip_request_pending_badge()
 	_ensure_payroll_excel_approval_access()
 	_ensure_payroll_settings_link()
+	_ensure_hr_workspace_includes_payroll()
 	_ensure_custom_docperm_flags("Payroll Settings", "HR Manager", {"read": 1, "write": 1, "print": 1, "email": 1})
 	_ensure_custom_docperm_flags("Payroll Settings", "HR User", {"read": 1, "write": 1, "print": 1, "email": 1})
 	_ensure_page_role("payroll-settings", "System Manager")
