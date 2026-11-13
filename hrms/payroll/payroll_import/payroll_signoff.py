@@ -28,33 +28,78 @@ def throw_if_not_daf(message: str | None = None) -> None:
 		frappe.throw(message or _("Only DAF can approve this payslip."), frappe.PermissionError)
 
 
-def approver_profile(user: str, request=None, prefer: str | None = None) -> dict:
-	"""Name, title, and signature file for the user who is approving.
+def user_has_md_access(user: str | None = None) -> bool:
+	user = user or frappe.session.user
+	if user == "Guest":
+		return False
+	if user == "Administrator":
+		return True
+	return "MD" in set(frappe.get_roles(user))
 
-	The signature already printed on the signed payroll for this period is used
-	when the approver's name is one of the signatories on that sheet.
-	"""
+
+def throw_if_not_md(message: str | None = None) -> None:
+	if not user_has_md_access():
+		frappe.throw(message or _("Only MD can approve this payslip."), frappe.PermissionError)
+
+
+def approver_profile(user: str, request=None, prefer: str | None = None) -> dict:
+	"""Allow approve when this user has a Payroll Sign-off image or the month has a signed payroll."""
 	if not user:
 		frappe.throw(_("Approver is required."))
-	if request is not None and _apply_signature_from_signed_payroll(user, request, prefer):
-		row = _user_signoff_row(user)
-		if row and row.payroll_signature:
-			return row
 	row = _user_signoff_row(user)
 	if row and row.payroll_signature:
 		return row
+	if request and _signed_payroll_uploads(request):
+		return row or {"full_name": frappe.db.get_value("User", user, "full_name") or user}
 	frappe.throw(
 		_("Upload your signature on your User profile (Payroll Sign-off) before approving.")
 	)
 
 
+def _latest_payroll_signature_url(user: str) -> str | None:
+	"""Newest Payroll Sign-off image for this user (by upload time), not an older file."""
+	if not user:
+		return None
+	attached = frappe.get_all(
+		"File",
+		filters={
+			"attached_to_doctype": "User",
+			"attached_to_name": user,
+			"attached_to_field": "payroll_signature",
+		},
+		fields=["name", "file_url", "creation"],
+		order_by="creation desc",
+		limit=20,
+	)
+	chosen = None
+	for item in attached:
+		if item.file_url:
+			chosen = item
+			break
+	if not chosen:
+		return frappe.db.get_value("User", user, "payroll_signature")
+	field_url = frappe.db.get_value("User", user, "payroll_signature")
+	if chosen.file_url != field_url:
+		frappe.db.set_value(
+			"User", user, "payroll_signature", chosen.file_url, update_modified=False
+		)
+	for item in attached:
+		if item.name != chosen.name:
+			frappe.db.set_value("File", item.name, "attached_to_field", "", update_modified=False)
+	return chosen.file_url
+
+
 def _user_signoff_row(user: str):
-	return frappe.db.get_value(
+	row = frappe.db.get_value(
 		"User",
 		user,
 		["full_name", "payroll_signature", "payroll_signatory_title"],
 		as_dict=True,
 	)
+	if not row:
+		return row
+	row.payroll_signature = _latest_payroll_signature_url(user)
+	return row
 
 
 def _name_tokens(value: str | None) -> set[str]:
@@ -510,32 +555,153 @@ def _clean_signature_image(image):
 	return image
 
 
-def _tight_content_crop(image):
-	"""Crop empty margin only. Pixels are not recolored."""
-	image = _clean_signature_image(image)
+def _flatten_signature_on_white(image):
+	from PIL import Image
+
+	if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+		rgba = image.convert("RGBA")
+		bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+		return Image.alpha_composite(bg, rgba).convert("RGB")
 	if image.mode != "RGB":
-		image = image.convert("RGB")
-	pixels = image.load()
+		return image.convert("RGB")
+	return image
+
+
+def _is_signature_mark(red: int, green: int, blue: int) -> bool:
+	"""Any ink on a user-uploaded signature, including gray/black and faint pen."""
+	if _is_pen_ink(red, green, blue) or _is_stamp_ink(red, green, blue):
+		return True
+	return min(red, green, blue) < 248
+
+
+def _longest_ink_span(counts, minimum):
+	"""Longest contiguous band with real ink, not first-to-last stray marks."""
+	best = None
+	start = None
+	for idx, count in enumerate(counts):
+		if count >= minimum:
+			if start is None:
+				start = idx
+			continue
+		if start is not None:
+			run = (start, idx - 1)
+			if best is None or run[1] - run[0] > best[1] - best[0]:
+				best = run
+			start = None
+	if start is not None:
+		run = (start, len(counts) - 1)
+		if best is None or run[1] - run[0] > best[1] - best[0]:
+			best = run
+	if best:
+		return best
+	hits = [idx for idx, count in enumerate(counts) if count > 0]
+	if not hits:
+		return None
+	return hits[0], hits[-1]
+
+
+def _extend_span_through_ink(counts, start: int, end: int, empty_limit: int = 6):
+	"""Keep thin strokes (the tail of g/y/j) that sit next to the main band."""
+	left = start
+	empty = 0
+	for idx in range(start - 1, -1, -1):
+		if counts[idx] > 0:
+			left = idx
+			empty = 0
+		else:
+			empty += 1
+			if empty >= empty_limit:
+				break
+	right = end
+	empty = 0
+	for idx in range(end + 1, len(counts)):
+		if counts[idx] > 0:
+			right = idx
+			empty = 0
+		else:
+			empty += 1
+			if empty >= empty_limit:
+				break
+	return left, right
+
+
+def _ink_bounding_box(image):
+	"""Full handwriting including descenders, ignoring a distant stray tick."""
 	width, height = image.size
-	xs, ys = [], []
+	pixels = image.load()
+	row_counts = [0] * height
+	col_counts = [0] * width
 	for y in range(height):
 		for x in range(width):
 			red, green, blue = pixels[x, y]
-			if _is_pen_ink(red, green, blue) or _is_stamp_ink(red, green, blue):
-				xs.append(x)
-				ys.append(y)
-	if not xs:
-		return image
-	pad = 8
-	box = (
-		max(0, min(xs) - pad),
-		max(0, min(ys) - pad),
-		min(width, max(xs) + pad),
-		min(height, max(ys) + pad),
+			if _is_signature_mark(red, green, blue):
+				row_counts[y] += 1
+				col_counts[x] += 1
+	row_peak = max(row_counts) if row_counts else 0
+	min_row = max(6, int(row_peak * 0.12))
+	rows = _longest_ink_span(row_counts, min_row)
+	if not rows:
+		return None
+	rows = _extend_span_through_ink(row_counts, rows[0], rows[1])
+	band_cols = [0] * width
+	for y in range(rows[0], rows[1] + 1):
+		for x in range(width):
+			red, green, blue = pixels[x, y]
+			if _is_signature_mark(red, green, blue):
+				band_cols[x] += 1
+	hits = [idx for idx, count in enumerate(band_cols) if count > 0]
+	if not hits:
+		return None
+	pad_x, pad_top, pad_bottom = 14, 12, 22
+	return (
+		max(0, hits[0] - pad_x),
+		max(0, rows[0] - pad_top),
+		min(width, hits[-1] + 1 + pad_x),
+		min(height, rows[1] + 1 + pad_bottom),
 	)
+
+
+def _tight_content_crop(image):
+	"""Crop empty margin only. Pixels are not recolored."""
+	image = _flatten_signature_on_white(image)
+	image = _clean_signature_image(image)
+	box = _ink_bounding_box(image)
+	if not box:
+		return image
 	if box[2] - box[0] < 8 or box[3] - box[1] < 8:
 		return image
 	return image.crop(box)
+
+
+def _fit_signature_slot(image):
+	"""Keep the original handwriting: full crop, no upscale, scale down only if huge."""
+	from PIL import Image
+
+	image = _flatten_signature_on_white(image)
+	box = _ink_bounding_box(image)
+	fitted = image.crop(box) if box else image
+	src_w, src_h = fitted.size
+	max_w, max_h = 640, 220
+	scale = min(max_w / max(src_w, 1), max_h / max(src_h, 1), 1.0)
+	if scale < 0.999:
+		fitted = fitted.resize(
+			(max(1, int(src_w * scale)), max(1, int(src_h * scale))),
+			Image.Resampling.LANCZOS,
+		)
+	return fitted
+
+
+def fit_payslip_signature_path(image_path: str | None) -> str | None:
+	"""Same slot for HR, DAF, or MD. Returns a PNG path or the original on failure."""
+	if not image_path or not os.path.exists(image_path):
+		return image_path
+	try:
+		from PIL import Image
+
+		fitted = _fit_signature_slot(Image.open(image_path))
+		return _write_png(_png_bytes_from_image(fitted), "payslip-sign")
+	except Exception:
+		return image_path
 
 
 def _page_scan_image(page):
@@ -673,7 +839,7 @@ def _colored_clusters(image, y_start: int, y_end: int) -> list[list]:
 	for y in range(max(0, y_start), min(image.height, y_end)):
 		for x in range(width):
 			red, green, blue = pixels[x, y]
-			if _is_pen_ink(red, green, blue) or _is_stamp_ink(red, green, blue):
+			if _is_pen_ink(red, green, blue):
 				points.append((x, y))
 	if len(points) < 40:
 		return []
@@ -700,7 +866,7 @@ def _scan_signoff_crops(page) -> list[bytes]:
 	if len(clusters) < 2:
 		return []
 	crops = []
-	for index, cluster in enumerate(clusters[:3]):
+	for cluster in clusters[:3]:
 		xs = [point[0] for point in cluster]
 		ys = [point[1] for point in cluster]
 		box = (
@@ -709,26 +875,9 @@ def _scan_signoff_crops(page) -> list[bytes]:
 			min(image.width, max(xs) + 8),
 			min(image.height, max(ys) + 8),
 		)
-		if index < 2:
-			box = _connected_ink_box(image, box, _is_pen_ink)
-			crop = _clean_signature_image(image.crop(box))
-			crops.append(_png_bytes_from_image(_tight_content_crop(crop)))
-			continue
-		else:
-			search = (
-				max(0, box[0]),
-				max(0, box[1] - 20),
-				min(image.width, box[2] + 36),
-				min(image.height, box[3] + 36),
-			)
-			box = _bbox_matching(image, search, _is_stamp_ink)
-			box = (
-				max(0, box[0] - 6),
-				max(0, box[1] - 16),
-				min(image.width, box[2] + 18),
-				min(image.height, box[3] + 18),
-			)
-		crops.append(_png_bytes_from_image(image.crop(box)))
+		box = _connected_ink_box(image, box, _is_pen_ink)
+		crop = _clean_signature_image(image.crop(box))
+		crops.append(_png_bytes_from_image(_tight_content_crop(crop)))
 	return crops
 
 
@@ -794,15 +943,27 @@ def _set_block_image(block: dict, blob: bytes, prefix: str) -> None:
 	block["image_url"] = None
 
 
-def _apply_sheet_signatures(doc, verified: dict | None, approved: dict | None) -> None:
-	"""Copy the signed-payroll signature images as they are, in sheet order."""
+def _apply_sheet_signatures(doc, verified: dict | None, approved: dict | None, flow: str = "Staff") -> None:
+	"""Stamp ink from the latest signed payroll PDF (Prepared / Verified / Approved)."""
 	crops = _request_sheet_crops(doc)
 	if not crops:
 		return
-	if verified and len(crops) >= 1:
-		_set_block_image(verified, crops[0], "payslip-hr-sign")
-	if approved and len(crops) >= 2:
-		_set_block_image(approved, crops[1], "payslip-daf-sign")
+	flow = (flow or "Staff").strip() or "Staff"
+	if len(crops) >= 3:
+		if flow == "HR":
+			verified_blob, approved_blob = crops[1], crops[2]
+		elif flow == "DAF":
+			verified_blob, approved_blob = crops[0], crops[2]
+		else:
+			verified_blob, approved_blob = crops[0], crops[1]
+	elif len(crops) >= 2:
+		verified_blob, approved_blob = crops[0], crops[1]
+	else:
+		verified_blob, approved_blob = crops[0], None
+	if verified and verified_blob:
+		_set_block_image(verified, verified_blob, "payslip-verified-sign")
+	if approved and approved_blob:
+		_set_block_image(approved, approved_blob, "payslip-approved-sign")
 
 
 def _cachet_from_blob(blob: bytes) -> bytes | None:
@@ -1015,10 +1176,6 @@ def signature_image_path(file_url: str | None) -> str | None:
 		return None
 	file_url = str(file_url).strip()
 	file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
-	if not file_name:
-		base = os.path.basename(file_url.split("?", 1)[0])
-		if base:
-			file_name = frappe.db.get_value("File", {"file_name": base}, "name")
 	if file_name:
 		path = frappe.get_doc("File", file_name).get_full_path()
 		if path and os.path.exists(path):
@@ -1028,14 +1185,10 @@ def signature_image_path(file_url: str | None) -> str | None:
 			return rooted
 
 	rel = file_url.split("?", 1)[0].lstrip("/")
-	base = os.path.basename(rel)
-	candidates = [
+	for path in (
 		frappe.get_site_path("public", rel),
-		frappe.get_site_path("private", "files", base),
-		frappe.get_site_path("public", "files", base),
 		os.path.join(frappe.utils.get_site_path(), rel),
-	]
-	for path in candidates:
+	):
 		if path and os.path.exists(path):
 			return path
 	return None
@@ -1044,44 +1197,19 @@ def signature_image_path(file_url: str | None) -> str | None:
 def _block(user: str | None, approved_on, heading: str) -> dict | None:
 	if not user:
 		return None
-	row = frappe.db.get_value(
-		"User",
-		user,
-		["full_name", "payroll_signature", "payroll_signatory_title"],
-		as_dict=True,
-	) or {}
+	row = _user_signoff_row(user) or {}
 	when = ""
 	if approved_on:
 		when = format_datetime(approved_on, "dd MMM yyyy, HH:mm")
 	image_url = row.get("payroll_signature")
 	image_path = signature_image_path(image_url)
-	if not image_path:
-		attached = frappe.get_all(
-			"File",
-			filters={"attached_to_doctype": "User", "attached_to_name": user},
-			fields=["file_url", "file_name"],
-			order_by="creation desc",
-			limit=20,
-		)
-		for item in attached:
-			label = f"{item.file_name or ''} {item.file_url or ''}".lower()
-			if "sign" in label or "payroll" in label:
-				image_path = signature_image_path(item.file_url)
-				if image_path:
-					image_url = item.file_url
-					break
 	if image_path and not image_url:
 		image_url = row.get("payroll_signature")
 	if not image_path:
 		image_url = None
-	elif os.path.exists(image_path):
-		try:
-			from PIL import Image
-
-			tight = _tight_content_crop(Image.open(image_path))
-			image_path = _write_png(_png_bytes_from_image(tight), "payslip-sign")
-		except Exception:
-			pass
+	else:
+		image_path = fit_payslip_signature_path(image_path)
+		image_url = None
 	return {
 		"heading": heading,
 		"name": row.get("full_name") or user,
@@ -1093,17 +1221,27 @@ def _block(user: str | None, approved_on, heading: str) -> dict | None:
 
 
 def signoff_for_request(doc) -> dict | None:
-	"""Verified-by (HR) and Approved-by (DAF), plus the sheet cachet without a third person."""
-	verified_user = doc.hr_approved_by
-	verified_on = doc.hr_approved_on
-	approved_user = doc.daf_approved_by
-	approved_on = doc.daf_approved_on
+	"""Signatures of the two people who actually approved this request."""
+	flow = (getattr(doc, "approval_flow", None) or "Staff").strip()
+	if flow == "HR":
+		verified_user, verified_on = doc.daf_approved_by, doc.daf_approved_on
+		approved_user, approved_on = getattr(doc, "md_approved_by", None), getattr(
+			doc, "md_approved_on", None
+		)
+	elif flow == "DAF":
+		verified_user, verified_on = doc.hr_approved_by, doc.hr_approved_on
+		approved_user, approved_on = getattr(doc, "md_approved_by", None), getattr(
+			doc, "md_approved_on", None
+		)
+	else:
+		verified_user, verified_on = doc.hr_approved_by, doc.hr_approved_on
+		approved_user, approved_on = doc.daf_approved_by, doc.daf_approved_on
 	if not verified_user and doc.status == "Approved" and doc.approved_by and not approved_user:
 		verified_user = doc.approved_by
 		verified_on = doc.approved_on
 	verified = _block(verified_user, verified_on, "Verified by")
 	approved = _block(approved_user, approved_on, "Approved by")
-	_apply_sheet_signatures(doc, verified, approved)
+	_apply_sheet_signatures(doc, verified, approved, flow)
 	cachet = _cachet_block(doc)
 	if not verified and not approved:
 		return None

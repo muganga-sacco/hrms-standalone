@@ -48,6 +48,10 @@ def parse_payroll_excel(file_path: str) -> dict[str, Any]:
 	headers = _normalize_headers(rows[header_row_idx])
 	column_map = _build_column_map(headers, sub_header_rows)
 	by_key = _headers_to_by_key(headers, sub_header_rows)
+	bonus_idx = _find_gross_bonus_column(rows, header_row_idx, data_start)
+	if bonus_idx is not None:
+		column_map["gross_bonus"] = bonus_idx
+	payroll_sheet_type = detect_payroll_sheet_type(rows)
 
 	while data_start < len(rows) and not _is_data_row(rows[data_start], column_map):
 		data_start += 1
@@ -56,10 +60,13 @@ def parse_payroll_excel(file_path: str) -> dict[str, Any]:
 	for row in rows[data_start :]:
 		if not row or not _is_data_row(row, column_map):
 			continue
-		records.append(_row_to_record(row, column_map, payroll_period_label, payroll_month))
+		records.append(
+			_row_to_record(
+				row, column_map, payroll_period_label, payroll_month, payroll_sheet_type
+			)
+		)
 
 	sheet_footer = parse_sheet_footer_from_rows(rows)
-	payroll_sheet_type = detect_payroll_sheet_type(rows)
 
 	return {
 		"sheet_name": sheet_name,
@@ -135,7 +142,7 @@ def detect_payroll_sheet_type(rows: list[tuple]) -> str:
 			if not isinstance(cell, str):
 				continue
 			upper = cell.upper()
-			if any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE PAY")):
+			if any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE")):
 				return "Variable"
 			if "LUMPSUM" in upper:
 				return "Lumpsum"
@@ -155,7 +162,7 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 				candidate = cell.strip()
 				if "STAFF PAYROLL" in upper:
 					title = candidate
-				elif any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE PAY")):
+				elif any(token in upper for token in ("BONUS", "INCENTIVE", "VARIABLE")):
 					if candidate and (not title or len(candidate) > len(title)):
 						title = candidate
 				elif "LUMPSUM" in upper and "GROSS" not in upper:
@@ -166,11 +173,17 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 				):
 					fallback_title = candidate
 		first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
-		if first_cell in ("S/N", "S/N ", "SN", "NAMES", "NAME", "#"):
+		if first_cell in ("S/N", "S/N ", "SN", "NAMES", "NAME", "#", "ID NUMBER", "EMPLOYEE ID"):
 			header_idx = idx
 			break
-		joined = " ".join(str(c or "").strip().upper() for c in row[:6])
-		if "NAMES" in joined and ("GROSS" in joined or "LUMPSUM" in joined or "DEPARTMENT" in joined):
+		joined = " ".join(str(c or "").strip().upper() for c in row)
+		if ("NAMES" in joined or "ID NUMBER" in joined or "EMPLOYEE ID" in joined) and (
+			"GROSS" in joined
+			or "BONUS" in joined
+			or "LUMPSUM" in joined
+			or "DEPARTMENT" in joined
+			or "BASIC" in joined
+		):
 			header_idx = idx
 			break
 	if header_idx is None:
@@ -184,7 +197,7 @@ def _find_header_and_data_start(rows: list[tuple]) -> tuple[str | None, int, lis
 			data_start += 1
 			continue
 		first = str(row[0] or "").strip().upper()
-		if first in ("", "S/N", "SN", "NAMES", "NAME") or "PENSION" in first or "RSSB" in first:
+		if first in ("", "S/N", "SN", "NAMES", "NAME", "ID NUMBER", "EMPLOYEE ID") or "PENSION" in first or "RSSB" in first:
 			sub_header_rows.append(row)
 			data_start += 1
 			continue
@@ -200,7 +213,7 @@ def _looks_like_sheet_title(text: str) -> bool:
 	if not text or len(text) < 12:
 		return False
 	upper = text.upper()
-	if any(token in upper for token in ("GROSS SALARY", "BASIC SALARY", "PAYE", "PENSION", "ID NUMBER")):
+	if any(token in upper for token in ("GROSS SALARY", "BASIC SALARY", "PAYE", "PENSION", "ID NUMBER", "EMPLOYEE ID")):
 		return False
 	has_year = bool(re.search(r"\b20\d{2}\b", text))
 	has_month = any(month in text.lower() for month in MONTH_MAP)
@@ -294,10 +307,17 @@ def _build_column_map(headers: list[str], sub_header_rows: list[tuple]) -> dict[
 		"name": "employee_name",
 		"id_number": "employee_id_number",
 		"id_no": "employee_id_number",
+		"employee_id": "employee_id_number",
+		"employee_id_no": "employee_id_number",
+		"employee_id_number": "employee_id_number",
 		"basic_salary": "basic_salary",
 		"basic": "basic_salary",
 		"gross_salary": "gross_salary",
 		"gross_lumpsum": "gross_salary",
+		"gross_bonus": "gross_bonus",
+		"bonus": "gross_bonus",
+		"bonuses": "gross_bonus",
+		"bonus_pay": "gross_bonus",
 		"gross": "gross_salary",
 		"department": "department",
 		"paye": "paye",
@@ -429,11 +449,12 @@ def _apply_fuzzy_field_map(by_key: dict[str, int], field_map: dict[str, int]) ->
 		("net_before_cbhi", lambda k: "net" in k and "before" in k and "cbhi" in k),
 		("cbhi", lambda k: "cbhi" in k and "before" not in k),
 		("basic_salary", lambda k: k == "basic" or ("basic" in k and "salary" in k)),
+		("gross_bonus", _is_gross_bonus_header),
 		("gross_salary", lambda k: k == "gross" or ("gross" in k and "salary" in k)),
 		("gross_salary", lambda k: "gross" in k and "lumpsum" in k),
 		("department", lambda k: k == "department" or k == "dept"),
 		("date_of_joining", lambda k: "joining" in k and "date" in k),
-		("employee_id_number", lambda k: k in ("id_number", "id_no") or ("id" in k and "number" in k)),
+		("employee_id_number", _is_employee_id_header),
 		("employee_name", lambda k: k in ("names", "name") and "account" not in k and "bank" not in k),
 		("position", lambda k: k == "position"),
 		("account_number", lambda k: "account" in k and "number" in k),
@@ -462,12 +483,47 @@ def _is_ict_allowance_header(key: str) -> bool:
 	return "ict" in _header_tokens(key)
 
 
+def _is_employee_id_header(key: str) -> bool:
+	"""ID NUMBER and Employee ID are the same payroll id column."""
+	if key in {"id_number", "id_no", "employee_id", "employee_id_no", "employee_id_number"}:
+		return True
+	tokens = _header_tokens(key)
+	if "id" in tokens and "number" in tokens:
+		return True
+	return "employee" in tokens and "id" in tokens
+
+
 def _is_tc_allowance_header(key: str) -> bool:
 	"""TC or ITC Allowance. Extra words are ignored. ICT is not TC."""
 	if _is_ict_allowance_header(key):
 		return False
 	tokens = _header_tokens(key)
 	return "tc" in tokens or "itc" in tokens
+
+
+def _is_gross_bonus_header(key: str) -> bool:
+	"""Gross Bonus, Bonus, Bonus Pay. Not PAYE/pension and not Basic Salary."""
+	if not key:
+		return False
+	if any(token in key for token in ("paye", "pension", "rssb", "basic", "net")):
+		return False
+	if "gross" in key and "bonus" in key:
+		return True
+	return key in ("bonus", "bonuses", "bonus_pay", "incentives", "incentive", "variable_pay")
+
+
+def _find_gross_bonus_column(rows: list[tuple], header_idx: int, data_start: int) -> int | None:
+	"""Find the Gross Bonus column even when the label sits on a sub-header row."""
+	end = data_start if data_start > header_idx else header_idx + 4
+	for row in rows[header_idx:end]:
+		if not row:
+			continue
+		for idx, cell in enumerate(row):
+			if not isinstance(cell, str):
+				continue
+			if _is_gross_bonus_header(_header_key(cell)):
+				return idx
+	return None
 
 
 def _header_key(text: str) -> str:
@@ -551,7 +607,11 @@ def _cell(row: tuple, column_map: dict[str, int], field: str, default=None):
 
 
 def _row_to_record(
-	row: tuple, column_map: dict[str, int], payroll_period_label: str, payroll_month: str | None
+	row: tuple,
+	column_map: dict[str, int],
+	payroll_period_label: str,
+	payroll_month: str | None,
+	payroll_sheet_type: str | None = None,
 ) -> dict[str, Any]:
 	doj = _cell(row, column_map, "date_of_joining")
 	if doj:
@@ -574,6 +634,7 @@ def _row_to_record(
 		"itc_allowance": _flt(_cell(row, column_map, "itc_allowance")),
 		"ict_allowance": _flt(_cell(row, column_map, "ict_allowance")),
 		"gross_salary": _flt(_cell(row, column_map, "gross_salary")),
+		"gross_bonus": _flt(_cell(row, column_map, "gross_bonus")),
 		"paye": _flt(_cell(row, column_map, "paye")),
 		"pension_employee": _flt(_cell(row, column_map, "pension_employee")),
 		"pension_employer": _flt(_cell(row, column_map, "pension_employer")),
@@ -596,6 +657,8 @@ def _row_to_record(
 		"account_number": _excel_text(_cell(row, column_map, "account_number")),
 		"bank": _excel_text(_cell(row, column_map, "bank")),
 	}
+	if (payroll_sheet_type or "").strip() == "Variable" and not record["gross_bonus"]:
+		record["gross_bonus"] = record["basic_salary"] or record["gross_salary"]
 	record["other_deductions"] = _flt(record["muganga_sacco_social_fund"]) + _flt(record["rpf"]) + _flt(
 		record["brd_loan"]
 	) + _flt(record["sport_subscription"]) + _flt(record["insurance_sanlam"]) + _flt(record["insurance_prime"])
@@ -648,6 +711,11 @@ def _excel_text(val) -> str | None:
 def _flt(val):
 	if val is None or val == "":
 		return 0.0
+	if isinstance(val, str):
+		text = val.strip().replace(",", "").replace(" ", "")
+		if text in ("", "-", "–", "—"):
+			return 0.0
+		val = text
 	try:
 		return float(val)
 	except (TypeError, ValueError):

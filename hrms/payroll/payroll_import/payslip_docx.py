@@ -388,7 +388,10 @@ def _append_payslip_signoff(doc, signoff: dict | None) -> None:
 			_tight(signature)
 			image_path = block.get("image_path")
 			if image_path and os.path.exists(image_path):
-				signature.add_run().add_picture(image_path, height=Inches(0.85))
+				from hrms.payroll.payroll_import.payroll_signoff import fit_payslip_signature_path
+
+				fitted_path = fit_payslip_signature_path(image_path) or image_path
+				signature.add_run().add_picture(fitted_path, height=Inches(0.55))
 			else:
 				signature.add_run(" ")
 
@@ -428,6 +431,7 @@ PAYSLIP_FIELDS = [
 	"payroll_month",
 	"payment_date",
 	"basic_salary",
+	"gross_bonus",
 	"transport_allowance",
 	"ict_allowance",
 	"itc_allowance",
@@ -455,7 +459,7 @@ PAYSLIP_FIELDS = [
 
 MAX_PAYSLIP_MONTHS = 24
 MAX_PAYSLIP_ROWS_ONE_PAGE = 3
-# Template grid is 14 columns, including ICT Allowance. Transport, TC Allowance,
+# Template grid is 14 columns, including ICT Allowance. Transport, ITC Allowance,
 # and Bonus are inserted. ICT is removed when no row has an ICT amount.
 PAYSLIP_TABLE_COLS_WITH_ICT = 17
 PAYSLIP_TABLE_COLS_WITHOUT_ICT = 16
@@ -518,7 +522,12 @@ def _is_lumpsum_record(record: dict) -> bool:
 
 
 def _is_variable_record(record: dict) -> bool:
-	return (record.get("payroll_sheet_type") or "").strip() == "Variable"
+	"""Any bonus / incentive / variable pay sheet, not only Fidelity."""
+	sheet = (record.get("payroll_sheet_type") or "").strip()
+	if sheet == "Variable":
+		return True
+	label = f"{record.get('payroll_period_label') or ''} {sheet}".upper()
+	return any(token in label for token in ("BONUS", "INCENTIVE", "VARIABLE"))
 
 
 def _add_employee_id_variant(id_variants: set[str], val) -> None:
@@ -732,6 +741,14 @@ def _apply_staff_record_to_merged(target: dict, record: dict) -> None:
 			target[field] = record.get(field)
 
 
+def _variable_bonus_amount(record: dict) -> float:
+	"""Bonus and other Incentives: Basic Salary if present, else Gross Bonus from the bonus Excel."""
+	basic = _flt(record.get("basic_salary"))
+	if basic:
+		return basic
+	return _flt(record.get("gross_bonus"))
+
+
 def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> None:
 	"""Add bonuses and incentives the employee received in this month."""
 	if not variables:
@@ -745,12 +762,14 @@ def _apply_variable_records_to_merged(target: dict, variables: list[dict]) -> No
 	variable_net = 0.0
 	for record in variables:
 		# Basic salary on the payslip stays the staff figure.
-		# The variable sheet's Basic salary is the bonus column.
-		bonus_incentives += _flt(record.get("basic_salary"))
+		# Variable sheet: Bonus and other Incentives = Basic Salary, else Gross Bonus.
+		bonus_amount = _variable_bonus_amount(record)
+		bonus_incentives += bonus_amount
 		target["transport_allowance"] += _flt(record.get("transport_allowance"))
 		target["itc_allowance"] += _flt(record.get("itc_allowance"))
 		target["ict_allowance"] += _flt(record.get("ict_allowance"))
-		gross_variable += _flt(record.get("gross_salary"))
+		sheet_gross = _flt(record.get("gross_salary"))
+		gross_variable += sheet_gross if sheet_gross else bonus_amount
 		variable_net += _sheet_net_paid(record)
 		target["paye"] += _flt(record.get("paye"))
 		target["pension_employee"] += _flt(record.get("pension_employee"))
@@ -1016,20 +1035,31 @@ def _insert_paragraph_after(paragraph, text: str):
 def _update_employee_header(doc, record: dict) -> None:
 	labels = {
 		"EMPLOYEE NAMES:": record.get("employee_name"),
+		"EMPLOYEE ID:": record.get("employee_id_number"),
 		"POSITION:": record.get("position"),
 		"DEPARTMENT:": record.get("department"),
 		"ACCOUNT NUMBER:": record.get("account_number"),
 		"BENEFICIARY BANK:": record.get("bank"),
 	}
 	department_para = None
+	names_para = None
+	has_employee_id = False
 	for paragraph in doc.paragraphs:
 		text = paragraph.text or ""
+		if text.startswith("EMPLOYEE ID:"):
+			has_employee_id = True
 		for prefix, value in labels.items():
 			if text.startswith(prefix):
 				display = (value or "").strip() or "-"
 				paragraph.text = f"{prefix} {display}"
+				if prefix == "EMPLOYEE NAMES:":
+					names_para = paragraph
 				if prefix == "DEPARTMENT:":
 					department_para = paragraph
+
+	if names_para and not has_employee_id:
+		eid = (record.get("employee_id_number") or "").strip() or "-"
+		_insert_paragraph_after(names_para, f"EMPLOYEE ID: {eid}")
 
 	variable_labels = [label for label in (record.get("variable_labels") or []) if label]
 	if variable_labels and department_para:
@@ -1148,13 +1178,13 @@ def _payslip_has_ict(records: list[dict]) -> bool:
 
 
 def _prepare_payslip_earning_columns(table, include_ict: bool) -> int:
-	"""Place Transport and TC Allowance after Basic Salary.
+	"""Place Transport and ITC Allowance after Basic Salary.
 
 	ICT Allowance is kept only when a payslip row has an ICT amount.
 	Bonus and other Incentives follows those allowance columns.
 	"""
 	_insert_column_after(table, 2, "Transport allowance", TRANSPORT_COLUMN_WIDTH)
-	_insert_column_after(table, 3, "TC Allowance", ALLOWANCE_COLUMN_WIDTH)
+	_insert_column_after(table, 3, "ITC Allowance", ALLOWANCE_COLUMN_WIDTH)
 	if include_ict:
 		bonus_after = 5
 		lumpsum_col = 7
@@ -1422,9 +1452,14 @@ def _signoff_blocks(signoff: dict | None) -> list[dict]:
 def _signoff_with_images(signoff: dict | None) -> dict | None:
 	if not signoff:
 		return None
+	from hrms.payroll.payroll_import.payroll_signoff import fit_payslip_signature_path
+
 	out = dict(signoff)
 	for key in ("verified_by", "approved_by", "cachet"):
 		block = dict(out.get(key) or {})
+		if key != "cachet" and block.get("image_path"):
+			block["image_path"] = fit_payslip_signature_path(block["image_path"])
+			block["image_url"] = None
 		if block.get("image_path"):
 			try:
 				block["image_data_uri"] = _image_data_uri(block["image_path"])
@@ -1464,8 +1499,8 @@ def _payslip_css() -> str:
 	.sign .heading{font-weight:700;min-height:18px}
 	.sign .name{font-weight:700;min-height:18px}
 	.sign .role{font-size:10pt;min-height:28px;margin-top:1px}
-	.sign .sig-slot{height:86px;margin:6px 0 4px}
-	.sign .sig-slot img{max-height:82px;width:auto;max-width:100%;object-fit:contain;object-position:left center;display:block}
+	.sign .sig-slot{height:74px;margin:6px 0 4px}
+	.sign .sig-slot img{height:70px;width:auto;max-width:210px;object-fit:contain;object-position:left center;display:block}
 	.sign .when{font-size:10pt;min-height:16px}
 	.sign td.cachet{width:32%;text-align:right;vertical-align:top;padding:0}
 	.sign td.cachet .sig-slot{height:145px}
@@ -1502,7 +1537,7 @@ def _payslip_html_from_records(records, employee_id_number: str, signoff: dict |
 		"Payment Date",
 		"Basic Salary",
 		"Transport allowance",
-		"TC Allowance",
+		"ITC Allowance",
 	]
 	if include_ict:
 		earning_labels.append("ICT Allowance")
@@ -1526,7 +1561,8 @@ def _payslip_html_from_records(records, employee_id_number: str, signoff: dict |
 
 	def _sign_cell(block: dict) -> str:
 		img = (
-			f'<img src="{block["image_data_uri"]}" alt="signature">'
+			f'<img src="{block["image_data_uri"]}" alt="signature" '
+			f'style="height:70px;width:auto;max-width:210px;object-fit:contain;display:block;">'
 			if block.get("image_data_uri")
 			else ""
 		)
@@ -1564,6 +1600,7 @@ def _payslip_html_from_records(records, employee_id_number: str, signoff: dict |
 		<div class="payslip-title">PAYSLIP</div>
 		<div class="payslip-meta">
 			<div>EMPLOYEE NAMES: {_txt(latest.get("employee_name"))}</div>
+			<div>EMPLOYEE ID: {_txt(latest.get("employee_id_number") or employee_id_number)}</div>
 			<div>POSITION: {_txt(latest.get("position"))}</div>
 			<div>DEPARTMENT: {_txt(latest.get("department"))}</div>
 			<div>ACCOUNT NUMBER: {_txt(latest.get("account_number"))}</div>
@@ -1616,7 +1653,7 @@ def build_payslip_pdf(
 	)
 	from frappe.utils.pdf import get_pdf
 
-	return get_pdf(
+	pdf = get_pdf(
 		html,
 		options={
 			"orientation": "Landscape",
@@ -1627,6 +1664,29 @@ def build_payslip_pdf(
 			"margin-right": "8mm",
 		},
 	)
+	return _encrypt_payslip_pdf(pdf)
+
+
+def _encrypt_payslip_pdf(pdf_bytes: bytes) -> bytes:
+	"""Lock the PDF so Word cannot open or convert it. PDF readers still open it."""
+	from io import BytesIO
+
+	from pypdf import PdfReader, PdfWriter
+	from pypdf.constants import UserAccessPermissions
+
+	reader = PdfReader(BytesIO(pdf_bytes))
+	writer = PdfWriter()
+	writer.append_pages_from_reader(reader)
+	owner = frappe.local.conf.get("encryption_key") or "muganga-payslip"
+	writer.encrypt(
+		user_password="",
+		owner_password=f"payslip:{owner}",
+		permissions_flag=UserAccessPermissions.PRINT | UserAccessPermissions.PRINT_TO_REPRESENTATION,
+		algorithm="AES-256",
+	)
+	out = BytesIO()
+	writer.write(out)
+	return out.getvalue()
 
 
 def payslip_table_headers(include_ict: bool = False) -> list[str]:
@@ -1635,7 +1695,7 @@ def payslip_table_headers(include_ict: bool = False) -> list[str]:
 		"Payment Date",
 		"Basic Salary",
 		"Transport",
-		"TC Allowance",
+		"ITC Allowance",
 	]
 	if include_ict:
 		headers.append("ICT Allowance")
@@ -1676,6 +1736,7 @@ def build_payslip_preview(
 	signoff = _signoff_with_images(signoff)
 	return {
 		"employee_name": latest.get("employee_name") or "-",
+		"employee_id_number": latest.get("employee_id_number") or employee_id_number or "-",
 		"position": latest.get("position") or "-",
 		"department": latest.get("department") or "-",
 		"account_number": latest.get("account_number") or "-",
@@ -1709,8 +1770,7 @@ def _record_to_table_row(record: dict, include_ict: bool = False) -> list[str]:
 	other_deductions = _sheet_int(_other_deductions_amount(record))
 	gross_salary = _flt(record.get("gross_salary"))
 	net = _sheet_int(_sheet_net_paid(record))
-	# TOTAL follows Gross − Net. Do not move leftover cents onto Other Deductions.
-	total_deductions = _sheet_int(gross_salary) - net if gross_salary and net else 0
+	total_deductions = paye + pension + maternity_employee + cbhi + other_deductions
 
 	values = [
 		pay_period,

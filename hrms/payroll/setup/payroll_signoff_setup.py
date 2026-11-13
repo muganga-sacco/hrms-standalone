@@ -25,7 +25,7 @@ def ensure_payroll_signoff():
 					"label": "Cachet",
 					"fieldtype": "Attach Image",
 					"insert_after": "payslip_cachet_section",
-					"description": "Company stamp used on approved payslips. Add it with the Add Cachet command.",
+					"description": "Company stamp used on approved payslips. Set it here with Add Cachet on Payroll Settings.",
 				},
 				{
 					"fieldname": "payslip_email_section",
@@ -39,7 +39,7 @@ def ensure_payroll_signoff():
 					"fieldtype": "Check",
 					"insert_after": "payslip_email_section",
 					"default": "1",
-					"description": "Email HR when a request is submitted, and email DAF when HR has approved.",
+					"description": "Email the next approver (HR, DAF, or MD) when a payslip request is waiting.",
 				},
 				{
 					"fieldname": "payslip_email_account",
@@ -62,6 +62,13 @@ def ensure_payroll_signoff():
 					"fieldtype": "Small Text",
 					"insert_after": "hr_payslip_notification_emails",
 					"description": "One or more addresses, comma or new line. If empty, all enabled users with role DAF are emailed.",
+				},
+				{
+					"fieldname": "md_payslip_notification_emails",
+					"label": "MD notification emails",
+					"fieldtype": "Small Text",
+					"insert_after": "daf_payslip_notification_emails",
+					"description": "MD addresses (comma or new line). Payslip requests waiting for MD are sent only here, not to every user with the MD role.",
 				},
 			],
 			"User": [

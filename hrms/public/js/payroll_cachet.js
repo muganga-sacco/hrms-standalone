@@ -12,6 +12,14 @@ hrms.payroll.add_cachet = function () {
 		frappe.msgprint(__("Only HR can add the payslip cachet."));
 		return;
 	}
+	if (!(cur_frm && cur_frm.doctype === "Payroll Settings")) {
+		frappe.set_route("Form", "Payroll Settings", "Payroll Settings");
+		frappe.show_alert({
+			message: __("Set the cachet on Payroll Settings."),
+			indicator: "blue",
+		});
+		return;
+	}
 	const input = document.createElement("input");
 	input.type = "file";
 	input.accept = "image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp";

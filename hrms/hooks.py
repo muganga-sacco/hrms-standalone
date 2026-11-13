@@ -42,9 +42,11 @@ app_include_css = "hrms.bundle.css"
 doctype_js = {
 	"Employee": "payroll/payroll_import/employee_payroll_id.js",
 	"Imported Payroll Record": "payroll/doctype/imported_payroll_record/imported_payroll_record_api.js",
+	"Payroll Excel Upload": "payroll/page/staff_payroll_dashboard/staff_payroll_dashboard.js",
 }
 doctype_list_js = {
 	"Payslip Request": "payroll/doctype/payslip_request/payslip_request_list.js",
+	"Payroll Excel Upload": "payroll/doctype/payroll_excel_upload/payroll_excel_upload_list.js",
 }
 permission_query_conditions = {
 	"Payslip Request": "hrms.payroll.doctype.payslip_request.payslip_request.get_permission_query_conditions",

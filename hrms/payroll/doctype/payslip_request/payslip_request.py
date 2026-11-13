@@ -86,6 +86,10 @@ class PayslipRequest(Document):
 
 		self._validate_period_fields()
 
+		self._validate_remarks()
+
+		self._validate_payroll_month_approved()
+
 		if self.employee:
 
 			resolved = resolve_employee_id_number_for_request(self)
@@ -103,6 +107,34 @@ class PayslipRequest(Document):
 				)
 
 			self.employee_id_number = resolved
+
+
+
+	def _validate_remarks(self) -> None:
+
+		if self.remarks == "Others (please specify)" and not (self.get("remarks_other") or "").strip():
+
+			frappe.throw(_("Please specify the reason for the request."))
+
+
+
+	def _validate_payroll_month_approved(self) -> None:
+
+		if frappe.flags.in_install or frappe.flags.in_migrate or frappe.flags.in_patch:
+
+			return
+
+		if self.status not in ("Draft", "Pending", "Pending HR", "Pending DAF", "Pending MD"):
+
+			return
+
+		from hrms.payroll.payroll_import.payroll_excel_approval import (
+
+			throw_if_payslip_months_not_approved,
+
+		)
+
+		throw_if_payslip_months_not_approved(self)
 
 
 
@@ -132,7 +164,7 @@ class PayslipRequest(Document):
 
 	def _validate_period_fields(self) -> None:
 
-		if self.status not in ("Draft", "Pending", "Pending HR", "Pending DAF"):
+		if self.status not in ("Draft", "Pending", "Pending HR", "Pending DAF", "Pending MD"):
 
 			return
 
@@ -369,6 +401,94 @@ def resolve_employee_id_number_for_request(doc) -> str:
 
 
 
+def _approval_flow_for_user(user: str | None = None) -> str:
+
+	user = user or frappe.session.user
+
+	if user in ("Administrator", "Guest"):
+
+		return "Staff"
+
+	from hrms.payroll.payroll_import.payroll_access import HR_PAYROLL_ROLES
+
+	roles = set(frappe.get_roles(user))
+
+	hr = bool(HR_PAYROLL_ROLES & roles)
+
+	daf = "DAF" in roles
+
+	# MD's own request is approved by HR then DAF, never by the MD.
+
+	if "MD" in roles:
+
+		return "Staff"
+
+	if daf:
+
+		return "DAF"
+
+	if hr:
+
+		return "HR"
+
+	return "Staff"
+
+
+
+
+
+def _is_self_payslip_request(doc, user: str | None = None) -> bool:
+
+	user = user or frappe.session.user
+
+	if not user or user == "Guest":
+
+		return False
+
+	if doc.employee:
+
+		emp_user = frappe.db.get_value("Employee", doc.employee, "user_id")
+
+		if emp_user and emp_user == user:
+
+			return True
+
+	return False
+
+
+
+
+
+def _block_self_approval(doc) -> None:
+
+	if _is_self_payslip_request(doc):
+
+		frappe.throw(_("You cannot approve or reject your own payslip request."))
+
+
+
+
+
+def _notify_next(doc) -> None:
+
+	from hrms.payroll.payroll_import.payslip_request_email import notify_approval_required
+
+	if doc.status == "Pending HR":
+
+		notify_approval_required(doc, "HR")
+
+	elif doc.status == "Pending DAF":
+
+		notify_approval_required(doc, "DAF")
+
+	elif doc.status == "Pending MD":
+
+		notify_approval_required(doc, "MD")
+
+
+
+
+
 @frappe.whitelist()
 
 def submit_payslip_request(docname: str):
@@ -383,15 +503,25 @@ def submit_payslip_request(docname: str):
 
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
-	doc.status = "Pending HR"
+	from hrms.payroll.payroll_import.payroll_excel_approval import (
+
+		throw_if_payslip_months_not_approved,
+
+	)
+
+	throw_if_payslip_months_not_approved(doc)
+
+	flow = _approval_flow_for_user()
+
+	doc.approval_flow = flow
+
+	doc.status = "Pending DAF" if flow == "HR" else "Pending HR"
 
 	doc.save(ignore_permissions=True)
 
 	frappe.db.commit()
 
-	from hrms.payroll.payroll_import.payslip_request_email import notify_pending_hr
-
-	notify_pending_hr(doc)
+	_notify_next(doc)
 
 	return {"status": doc.status}
 
@@ -411,11 +541,13 @@ def approve_payslip_request(docname: str):
 
 		frappe.throw(_("Only requests waiting for HR can be approved."))
 
+	_block_self_approval(doc)
+
 	from hrms.payroll.payroll_import.payroll_signoff import approver_profile
 
 	approver_profile(frappe.session.user, request=doc, prefer="prepared")
 
-	doc.status = "Pending DAF"
+	flow = (doc.approval_flow or "Staff").strip() or "Staff"
 
 	doc.hr_approved_by = frappe.session.user
 
@@ -429,13 +561,27 @@ def approve_payslip_request(docname: str):
 
 		doc.employee_id_number = resolved_id
 
+	if flow == "DAF":
+
+		doc.status = "Pending MD"
+
+	elif doc.daf_approved_by:
+
+		doc.status = "Approved"
+
+		doc.approved_by = doc.daf_approved_by
+
+		doc.approved_on = doc.daf_approved_on
+
+	else:
+
+		doc.status = "Pending DAF"
+
 	doc.save(ignore_permissions=True)
 
 	frappe.db.commit()
 
-	from hrms.payroll.payroll_import.payslip_request_email import notify_pending_daf
-
-	notify_pending_daf(doc)
+	_notify_next(doc)
 
 	return {"status": doc.status}
 
@@ -457,17 +603,75 @@ def daf_approve_payslip_request(docname: str):
 
 		frappe.throw(_("Only requests waiting for DAF can be approved."))
 
-	approver_profile(frappe.session.user, request=doc, prefer="verified")
+	_block_self_approval(doc)
 
-	doc.status = "Approved"
+	flow = (doc.approval_flow or "Staff").strip() or "Staff"
 
 	doc.daf_approved_by = frappe.session.user
 
 	doc.daf_approved_on = now_datetime()
 
+	doc.rejection_reason = None
+
+	if flow == "HR":
+
+		approver_profile(frappe.session.user, request=doc, prefer="prepared")
+
+		doc.status = "Pending MD"
+
+		doc.save(ignore_permissions=True)
+
+		frappe.db.commit()
+
+		_notify_next(doc)
+
+		return {"status": doc.status}
+
+	approver_profile(frappe.session.user, request=doc, prefer="verified")
+
+	doc.status = "Approved"
+
 	doc.approved_by = frappe.session.user
 
 	doc.approved_on = doc.daf_approved_on
+
+	doc.save(ignore_permissions=True)
+
+	frappe.db.commit()
+
+	return {"status": doc.status}
+
+
+
+
+
+@frappe.whitelist()
+
+def md_approve_payslip_request(docname: str):
+
+	from hrms.payroll.payroll_import.payroll_signoff import approver_profile, throw_if_not_md
+
+	throw_if_not_md()
+
+	doc = _get_request_doc(docname)
+
+	if doc.status != "Pending MD":
+
+		frappe.throw(_("Only requests waiting for MD can be approved."))
+
+	_block_self_approval(doc)
+
+	approver_profile(frappe.session.user, request=doc, prefer="verified")
+
+	doc.status = "Approved"
+
+	doc.md_approved_by = frappe.session.user
+
+	doc.md_approved_on = now_datetime()
+
+	doc.approved_by = frappe.session.user
+
+	doc.approved_on = doc.md_approved_on
 
 	doc.rejection_reason = None
 
@@ -489,13 +693,17 @@ def reject_payslip_request(docname: str, rejection_reason: str | None = None):
 
 	doc = _get_request_doc(docname)
 
-	if doc.status not in ("Pending HR", "Pending DAF", "Pending"):
+	from hrms.payroll.payroll_import.payroll_signoff import user_has_md_access
+
+	if doc.status not in ("Pending HR", "Pending DAF", "Pending MD", "Pending"):
 
 		frappe.throw(_("Only requests waiting for approval can be rejected."))
 
-	if not (user_has_hr_payroll_access() or user_has_daf_access()):
+	if not (user_has_hr_payroll_access() or user_has_daf_access() or user_has_md_access()):
 
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	_block_self_approval(doc)
 
 	doc.status = "Rejected"
 
@@ -581,7 +789,9 @@ def _user_may_preview_payslip(doc: Document) -> bool:
 
 	from hrms.payroll.payroll_import.payroll_signoff import user_has_daf_access
 
-	if user_has_hr_payroll_access() or user_has_daf_access():
+	from hrms.payroll.payroll_import.payroll_signoff import user_has_md_access
+
+	if user_has_hr_payroll_access() or user_has_daf_access() or user_has_md_access():
 
 		return True
 
@@ -604,17 +814,19 @@ def preview_payslip_for_request(docname: str):
 
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
-	if doc.status not in ("Pending", "Pending HR", "Pending DAF", "Approved"):
+	if doc.status not in ("Pending", "Pending HR", "Pending DAF", "Pending MD", "Approved"):
 
 		frappe.throw(_("Payslip can be previewed after the request is submitted."))
 
-	if doc.status in ("Pending", "Pending HR", "Pending DAF") and not (
+	from hrms.payroll.payroll_import.payroll_signoff import user_has_md_access
 
-		user_has_hr_payroll_access() or user_has_daf_access()
+	if doc.status in ("Pending", "Pending HR", "Pending DAF", "Pending MD") and not (
+
+		user_has_hr_payroll_access() or user_has_daf_access() or user_has_md_access()
 
 	):
 
-		frappe.throw(_("Only HR or DAF can preview a payslip before approval."))
+		frappe.throw(_("Only HR, DAF, or MD can preview a payslip before approval."))
 
 	params = build_download_params_from_request(doc)
 
@@ -640,7 +852,7 @@ def download_payslip_for_request(docname: str):
 
 	if doc.status != "Approved":
 
-		frappe.throw(_("Payslip can only be downloaded after HR and DAF approval."))
+		frappe.throw(_("Payslip can only be downloaded after it is approved."))
 
 	if not _user_may_act_on_own_request(doc):
 
