@@ -1829,7 +1829,8 @@ def send_notification_to_supervisor(self):
         employee=self.employee
         salutation= frappe.db.get_value("Employee",{"employee":employee},"salutation")
         name = self.name
-        
+        if not result or not result[0] or not result[0][0]:
+            return
         result = result[0][0]
 
         
@@ -2000,21 +2001,33 @@ def send_notification_to_supervisor(self):
 ##### Sending notification to HR, DAF, and DG when leave is approved #####
 
 
+def _first_email_for_role_profile(role_profile: str):
+    users = frappe.get_all(
+        "User",
+        filters={"role_profile_name": role_profile, "enabled": 1},
+        fields=["email"],
+        ignore_permissions=True,
+    )
+    emails = [row.email for row in users if row.email]
+    return emails[0] if emails else None
+
+
 def send_notification_levels(self):
-    # Get HR emails
-    get_HR = frappe.db.get_list('User', filters={'role_profile_name': 'HR'}, fields=['email'])
-    hr_emails = [user['email'] for user in get_HR]
-    hr_emails=hr_emails[0]
-    
-    # Get DAF emails
-    get_DAF = frappe.db.get_list('User', filters={'role_profile_name': 'DAF'}, fields=['email'])
-    daf_emails = [user['email'] for user in get_DAF]
-    daf_emails = daf_emails[0]
-    
-    # Get DG emails (Hr manager)
-    get_DG = frappe.db.get_list('User', filters={'role_profile_name': 'Hr manager'}, fields=['email'])
-    dg_emails = [user['email'] for user in get_DG]
-    dg_emails = dg_emails[0]
+    if self.workflow_state not in (
+        "Pending HR Approval",
+        "Pending DAF Approval",
+        "Pending MD Approval",
+    ):
+        return
+    hr_emails = _first_email_for_role_profile("HR")
+    daf_emails = _first_email_for_role_profile("DAF")
+    dg_emails = _first_email_for_role_profile("Hr manager")
+    if self.workflow_state == "Pending HR Approval" and not hr_emails:
+        return
+    if self.workflow_state == "Pending DAF Approval" and not daf_emails:
+        return
+    if self.workflow_state == "Pending MD Approval" and not dg_emails:
+        return
     employee_name = self.employee_name
     employee=self.employee
     salutation= frappe.db.get_value("Employee",{"employee":employee},"salutation")

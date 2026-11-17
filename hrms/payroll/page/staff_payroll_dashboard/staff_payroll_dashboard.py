@@ -331,6 +331,7 @@ def get_staff_payroll_dashboard(
 	payroll_month: str,
 	company: str | None = None,
 	payroll_sheet_type: str | None = "Staff Payroll",
+	payroll_excel_upload: str | None = None,
 ):
 	if not payroll_month:
 		frappe.throw(_("Payroll Month is required."))
@@ -343,6 +344,8 @@ def get_staff_payroll_dashboard(
 	filters: dict = {"docstatus": 1, "payroll_month": month}
 	if company:
 		filters["company"] = company
+	if payroll_excel_upload:
+		filters["payroll_excel_upload"] = payroll_excel_upload
 	effective_sheet_type = payroll_sheet_type if payroll_sheet_type not in ("All", "", None) else "Staff Payroll"
 	if payroll_sheet_type and payroll_sheet_type not in ("All", ""):
 		filters["payroll_sheet_type"] = payroll_sheet_type

@@ -34,7 +34,7 @@ hrms.AddLeaveDays = class AddLeaveDays {
 			</style>
 			<div class="add-leave-days">
 				<p class="ald-help">${__(
-					"New Leaves starts at 0. Total is existing allocated plus the number you type. This does not replace the current grant."
+					"New Leaves starts at 0. Type a positive number to add days, or a negative number to remove days. Total is existing allocated plus that number."
 				)}</p>
 				<div class="ald-row">
 					<div>
@@ -69,7 +69,7 @@ hrms.AddLeaveDays = class AddLeaveDays {
 				<div class="ald-row">
 					<div>
 						<label>${__("New Leaves Allocated")}</label>
-						<input type="number" class="form-control ald-extra" value="0" min="0" step="0.5">
+						<input type="number" class="form-control ald-extra" value="0" step="0.5">
 					</div>
 					<div>
 						<label>${__("Total Leaves Allocated")}</label>
@@ -77,7 +77,7 @@ hrms.AddLeaveDays = class AddLeaveDays {
 					</div>
 				</div>
 				<div class="ald-actions">
-					<button class="btn btn-primary btn-sm ald-save">${__("Add days")}</button>
+					<button class="btn btn-primary btn-sm ald-save">${__("Apply days")}</button>
 				</div>
 			</div>
 		`);
@@ -155,8 +155,8 @@ hrms.AddLeaveDays = class AddLeaveDays {
 			return;
 		}
 		const days = this.extra_days();
-		if (days <= 0) {
-			frappe.msgprint(__("Type extra days in New Leaves Allocated."));
+		if (days === 0) {
+			frappe.msgprint(__("Type days in New Leaves Allocated (positive to add, negative to remove)."));
 			return;
 		}
 		frappe.call({
@@ -168,13 +168,18 @@ hrms.AddLeaveDays = class AddLeaveDays {
 				year: 2026,
 			},
 			freeze: true,
-			freeze_message: __("Adding days..."),
+			freeze_message: days < 0 ? __("Removing days...") : __("Adding days..."),
 			callback: (r) => {
 				frappe.show_alert({
-					message: __("Added {0} days. Total is now {1}.", [
-						days,
-						r.message.existing_total,
-					]),
+					message: days < 0
+						? __("Removed {0} days. Total is now {1}.", [
+							Math.abs(days),
+							r.message.existing_total,
+						])
+						: __("Added {0} days. Total is now {1}.", [
+							days,
+							r.message.existing_total,
+						]),
 					indicator: "green",
 				});
 				this.summary = r.message;

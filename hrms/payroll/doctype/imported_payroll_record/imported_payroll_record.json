@@ -23,6 +23,7 @@
   "currency",
   "section_break_amounts",
   "basic_salary",
+  "gross_bonus",
   "transport_allowance",
   "itc_allowance",
   "ict_allowance",
@@ -163,6 +164,12 @@
    "fieldtype": "Currency",
    "options": "currency",
    "label": "Basic Salary"
+  },
+  {
+   "fieldname": "gross_bonus",
+   "fieldtype": "Currency",
+   "options": "currency",
+   "label": "Gross Bonus"
   },
   {
    "fieldname": "transport_allowance",

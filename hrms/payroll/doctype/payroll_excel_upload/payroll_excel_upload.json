@@ -15,6 +15,8 @@
   "column_break_1",
   "status",
   "imported_records",
+  "section_break_preview",
+  "payroll_preview",
   "section_break_sheet_meta",
   "payroll_sheet_logo",
   "payroll_sheet_footer",
@@ -22,6 +24,15 @@
   "payroll_file",
   "section_break_signoff",
   "signed_payroll",
+  "section_break_approval",
+  "submitted_by",
+  "submitted_for_approval_on",
+  "column_break_approval",
+  "daf_approved_by",
+  "daf_approved_on",
+  "md_approved_by",
+  "md_approved_on",
+  "rejection_reason",
   "section_break_log",
   "import_log"
  ],
@@ -75,8 +86,9 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Status",
-   "options": "Draft\nImported\nFailed",
+   "options": "Draft\nImported\nPending DAF\nPending MD\nApproved\nRejected\nFailed",
    "read_only": 1
   },
   {
@@ -84,6 +96,16 @@
    "fieldtype": "Int",
    "label": "Imported Records",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_break_preview",
+   "fieldtype": "Section Break",
+   "label": "Payroll Preview"
+  },
+  {
+   "fieldname": "payroll_preview",
+   "fieldtype": "HTML",
+   "label": "Payroll Preview"
   },
   {
    "fieldname": "section_break_sheet_meta",
@@ -126,6 +148,60 @@
    "label": "Signed Payroll"
   },
   {
+   "fieldname": "section_break_approval",
+   "fieldtype": "Section Break",
+   "label": "Approval"
+  },
+  {
+   "fieldname": "submitted_by",
+   "fieldtype": "Link",
+   "label": "Submitted By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_for_approval_on",
+   "fieldtype": "Datetime",
+   "label": "Submitted For Approval On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_approval",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "daf_approved_by",
+   "fieldtype": "Link",
+   "label": "DAF Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "daf_approved_on",
+   "fieldtype": "Datetime",
+   "label": "DAF Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "md_approved_by",
+   "fieldtype": "Link",
+   "label": "MD Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "md_approved_on",
+   "fieldtype": "Datetime",
+   "label": "MD Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_break_log",
    "fieldtype": "Section Break",
    "label": "Log"
@@ -145,7 +221,7 @@
    "link_fieldname": "payroll_excel_upload"
   }
  ],
- "modified": "2026-09-22 12:00:00.000000",
+ "modified": "2026-11-10 14:30:00.000000",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Payroll Excel Upload",
@@ -174,6 +250,24 @@
    "report": 1,
    "role": "HR User",
    "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "DAF",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "MD",
    "write": 1
   }
  ],

@@ -22,15 +22,20 @@
   "to_year",
   "to_month_name",
   "to_month",
+  "section_break_reason",
+  "remarks",
+  "remarks_other",
   "section_break_hr",
   "hr_approved_by",
   "hr_approved_on",
   "daf_approved_by",
   "daf_approved_on",
+  "md_approved_by",
+  "md_approved_on",
+  "approval_flow",
   "approved_by",
   "approved_on",
-  "rejection_reason",
-  "remarks"
+  "rejection_reason"
  ],
  "fields": [
   {
@@ -54,6 +59,7 @@
    "fetch_from": "employee.employee_number",
    "fieldname": "employee_id_number",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Employee Number",
    "read_only": 1
   },
@@ -76,7 +82,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Draft\nPending HR\nPending DAF\nApproved\nRejected",
+   "options": "Draft\nPending HR\nPending DAF\nPending MD\nApproved\nRejected",
    "read_only": 1
   },
   {
@@ -118,6 +124,27 @@
    "fieldname": "daf_approved_on",
    "fieldtype": "Datetime",
    "label": "DAF Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "md_approved_by",
+   "fieldtype": "Link",
+   "label": "MD Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "md_approved_on",
+   "fieldtype": "Datetime",
+   "label": "MD Approved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approval_flow",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Approval Flow",
+   "options": "Staff\nHR\nDAF",
    "read_only": 1
   },
   {
@@ -184,6 +211,11 @@
    "label": "To Month"
   },
   {
+   "fieldname": "section_break_reason",
+   "fieldtype": "Section Break",
+   "label": "Reason for the request"
+  },
+  {
    "fieldname": "section_break_hr",
    "fieldtype": "Section Break",
    "label": "HR Review"
@@ -197,13 +229,23 @@
   },
   {
    "fieldname": "remarks",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Reason for the request",
+   "options": "\nBanking Services-Loan application\nProof of Income\nVisa and Immigration Applications\nFinancial Planning\nPersonal Records\nTax related matters\nOthers (please specify)",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.remarks==\"Others (please specify)\"",
+   "fieldname": "remarks_other",
    "fieldtype": "Small Text",
-   "label": "Employee Remarks"
+   "label": "If others please specify",
+   "mandatory_depends_on": "eval:doc.remarks==\"Others (please specify)\""
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-01 22:55:00.000000",
+ "modified": "2026-11-05 09:40:00.000000",
  "modified_by": "Administrator",
  "module": "Payroll",
  "name": "Payslip Request",
