@@ -16,3 +16,11 @@ node_modules
 hrms/docs/current
 hrms/public/frontend
 hrms/www/hrms.html
+
+# Local Muganga auto-payroll (untracked) — keep out of git until tests pass
+hrms/payroll/doctype/employee_payroll_loan/
+hrms/payroll/doctype/payroll_award/
+hrms/payroll/payroll_import/muganga_payroll_calc.py
+hrms/payroll/payroll_import/muganga_payroll_generate.py
+hrms/payroll/payroll_import/test_muganga_payroll_calc.py
+hrms/payroll/setup/ensure_muganga_payroll_setup.py
