@@ -1597,7 +1597,7 @@ def _payslip_html_from_records(records, employee_id_number: str, signoff: dict |
 				<td class="photo">{photo_html}</td>
 			</tr>
 		</table>
-		<div class="payslip-title">PAYSLIP</div>
+		<div class="payslip-title">DIGITAL PAYSLIP</div>
 		<div class="payslip-meta">
 			<div>EMPLOYEE NAMES: {_txt(latest.get("employee_name"))}</div>
 			<div>EMPLOYEE ID: {_txt(latest.get("employee_id_number") or employee_id_number)}</div>
@@ -1668,7 +1668,7 @@ def build_payslip_pdf(
 
 
 def _encrypt_payslip_pdf(pdf_bytes: bytes) -> bytes:
-	"""Lock the PDF so Word cannot open or convert it. PDF readers still open it."""
+	"""No open-password, so a PDF reader opens the file. Editing stays locked."""
 	from io import BytesIO
 
 	from pypdf import PdfReader, PdfWriter
