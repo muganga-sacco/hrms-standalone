@@ -323,6 +323,9 @@ def _build_column_map(headers: list[str], sub_header_rows: list[tuple]) -> dict[
 		"paye": "paye",
 		"paye_pay_as_you_earn": "paye",
 		"net_salary": "net_salary",
+		"net_lumpsum": "net_salary",
+		"net_lump_sum": "net_salary",
+		"net_lumpsum_salary": "net_salary",
 		"net_paid": "net_paid",
 		"net_take_home_salary": "take_home",
 		"net_takehome_salary": "take_home",
@@ -446,6 +449,10 @@ def _apply_fuzzy_field_map(by_key: dict[str, int], field_map: dict[str, int]) ->
 		("maternity_employee", lambda k: "maternity" in k and "employee" in k),
 		("maternity_employer", lambda k: "maternity" in k and "employer" in k),
 		("take_home", lambda k: "take" in k and "home" in k),
+		(
+			"net_salary",
+			lambda k: "net" in k and "lump" in k and "gross" not in k and "total" not in k,
+		),
 		("net_before_cbhi", lambda k: "net" in k and "before" in k and "cbhi" in k),
 		("cbhi", lambda k: "cbhi" in k and "before" not in k),
 		("basic_salary", lambda k: k == "basic" or ("basic" in k and "salary" in k)),
@@ -544,15 +551,35 @@ def _is_footer_or_signature_row(row: tuple) -> bool:
 		"verified by",
 		"approved by",
 		"grand total",
+		"total lumpsum",
 		"signature",
 	)
 	return any(marker in text for marker in markers)
 
 
+def _is_subtotal_row(row: tuple) -> bool:
+	"""Skip TOTAL LUMPSUM / GRAND TOTAL lines so they are not imported as staff (that doubles the footer)."""
+	if _is_footer_or_signature_row(row):
+		return True
+	for cell in row[:10]:
+		if not isinstance(cell, str):
+			continue
+		upper = cell.strip().upper()
+		if not upper:
+			continue
+		if upper.startswith("GRAND TOTAL"):
+			return True
+		if "TOTAL LUMPSUM" in upper:
+			return True
+		if re.match(r"^TOTAL\s+(LUMPSUM|STAFF|PAYROLL|VARIABLE)\b", upper):
+			return True
+	return False
+
+
 def _is_data_row(row: tuple, column_map: dict[str, int] | None = None) -> bool:
 	if not row:
 		return False
-	if _is_footer_or_signature_row(row):
+	if _is_footer_or_signature_row(row) or _is_subtotal_row(row):
 		return False
 	for cell in row:
 		if isinstance(cell, str) and cell.strip().upper().startswith("GRAND TOTAL"):

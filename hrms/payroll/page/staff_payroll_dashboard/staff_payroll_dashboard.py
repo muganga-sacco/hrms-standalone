@@ -22,6 +22,15 @@ from hrms.payroll.payroll_import.payroll_sheet_layout import (
 	resolve_payroll_logo_file_url,
 )
 
+def _is_excel_total_row(record: dict) -> bool:
+	"""Excel TOTAL LUMPSUM / GRAND TOTAL lines imported as fake staff double the footer."""
+	blob = " ".join(
+		str(record.get(key) or "")
+		for key in ("employee_name", "employee_id_number", "department", "position")
+	).upper()
+	return "TOTAL LUMPSUM" in blob or blob.strip().startswith("GRAND TOTAL") or "GRAND TOTAL" in blob
+
+
 LUMPSUM_NUMERIC_FIELDS = [
 	"gross_salary",
 	"paye",
@@ -359,6 +368,7 @@ def get_staff_payroll_dashboard(
 		+ ["payroll_period_label", "currency", "payroll_excel_upload", "company", "employee"],
 		order_by="payroll_period_label asc, employee_id_number asc",
 	)
+	records = [row for row in records if not _is_excel_total_row(row)]
 
 	effective_company = company or (records[0].get("company") if records else None)
 	if effective_sheet_type == "Variable":
